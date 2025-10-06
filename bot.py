@@ -345,6 +345,11 @@ class PendingMessagesManager:
     def add_message(self, chat_id: int, user_id: int, message_text: str, message_id: int, chat_title: str = None, username: str = None, first_name: str = None):
         # Генерируем уникальный ключ для каждого сообщения
         key = f"{chat_id}_{user_id}_{message_id}_{int(datetime.now().timestamp())}"
+        
+        # Если текст сообщения пустой (например, фото/документ), создаем описание
+        if not message_text:
+            message_text = "[Сообщение без текста]"
+        
         self.pending_messages[key] = {
             'chat_id': chat_id,
             'user_id': user_id,
@@ -509,7 +514,7 @@ def is_working_hours():
 
 def should_respond_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Определяет, нужно ли обрабатывать сообщение"""
-    if not update.message or not update.message.text:
+    if not update or not update.message:
         return False
     
     if update.message.from_user.id == context.bot.id:
@@ -527,10 +532,11 @@ def should_respond_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if update.edited_message:
         return False
         
-    if update.message.text.startswith('/'):
+    if update.message.text and update.message.text.startswith('/'):
         return False
         
-    if len(update.message.text.strip()) < 1:
+    # Разрешаем обработку сообщений без текста (фото, документы и т.д.)
+    if update.message.text and len(update.message.text.strip()) < 1:
         return False
         
     return True
@@ -586,6 +592,9 @@ def minutes_to_hours_minutes(minutes: int) -> str:
 
 async def add_exception_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Добавляет пользователя в исключения"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -617,6 +626,9 @@ async def add_exception_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def remove_exception_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Удаляет пользователя из исключений"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -648,6 +660,9 @@ async def remove_exception_command(update: Update, context: ContextTypes.DEFAULT
 
 async def list_exceptions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает список всех исключений"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -677,6 +692,9 @@ async def list_exceptions_command(update: Update, context: ContextTypes.DEFAULT_
 
 async def clear_exceptions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Очищает все исключения"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -688,6 +706,9 @@ async def clear_exceptions_command(update: Update, context: ContextTypes.DEFAULT
 
 async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /funnels - показывает текущие настройки воронок"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -716,6 +737,9 @@ async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def set_funnel_1_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /set_funnel_1"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -736,6 +760,9 @@ async def set_funnel_1_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def set_funnel_2_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /set_funnel_2"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -756,6 +783,9 @@ async def set_funnel_2_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def set_funnel_3_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /set_funnel_3"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -776,6 +806,9 @@ async def set_funnel_3_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def reset_funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /reset_funnels"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -787,6 +820,9 @@ async def reset_funnels_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
+    if not update or not update.message:
+        return
+        
     await update.message.reply_text(
         "🤖 Бот-автоответчик запущен!\n\n"
         "📋 Доступные команды:\n"
@@ -805,6 +841,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /help"""
+    if not update or not update.message:
+        return
+        
     help_text = """
 📖 **СПРАВКА ПО КОМАНДАМ БОТА**
 
@@ -849,6 +888,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /status"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -880,6 +922,9 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def set_work_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /set_work_chat"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -892,6 +937,9 @@ async def set_work_chat_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /managers"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -921,6 +969,9 @@ async def managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /stats"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -1121,6 +1172,9 @@ async def check_all_funnels(context: ContextTypes.DEFAULT_TYPE):
 
 async def check_voronka_1_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ручная проверка воронки 1"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -1131,6 +1185,9 @@ async def check_voronka_1_command(update: Update, context: ContextTypes.DEFAULT_
 
 async def check_voronka_2_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ручная проверка воронки 2"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -1141,6 +1198,9 @@ async def check_voronka_2_command(update: Update, context: ContextTypes.DEFAULT_
 
 async def check_voronka_3_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ручная проверка воронки 3"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -1151,6 +1211,9 @@ async def check_voronka_3_command(update: Update, context: ContextTypes.DEFAULT_
 
 async def check_all_voronki_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ручная проверка всех воронок"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -1161,6 +1224,9 @@ async def check_all_voronki_command(update: Update, context: ContextTypes.DEFAUL
 
 async def force_funnel_check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Принудительная проверка воронок (игнорирует временные ограничения)"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -1196,6 +1262,9 @@ async def force_funnel_check_command(update: Update, context: ContextTypes.DEFAU
 
 async def clear_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ручное удаление всех сообщений из текущего чата"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -1210,6 +1279,9 @@ async def clear_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def clear_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ручное удаление всех сообщений из всех чатов"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -1219,6 +1291,9 @@ async def clear_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показывает все непрочитанные сообщения"""
+    if not update or not update.message:
+        return
+        
     if not is_admin(update.message.from_user.id):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
@@ -1257,6 +1332,9 @@ async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_manager_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка ответов менеджеров - БЕЗ удаления сообщений"""
+    if not update or not update.message:
+        return
+        
     username = update.message.from_user.username
     if not is_manager(update.message.from_user.id, username):
         return
@@ -1269,7 +1347,10 @@ async def handle_manager_reply(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка сообщений в группах"""
-    logger.info(f"📨 Получено групповое сообщение: {update.message.chat.title} - {update.message.text[:50]}...")
+    if not update or not update.message:
+        return
+        
+    logger.info(f"📨 Получено групповое сообщение: {update.message.chat.title} - {update.message.text[:50] if update.message.text else '[без текста]'}...")
     
     username = update.message.from_user.username
     if is_manager(update.message.from_user.id, username):
@@ -1298,11 +1379,12 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             chat_title = update.message.chat.title
             username = update.message.from_user.username
             first_name = update.message.from_user.first_name
+            message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
             
             pending_messages_manager.add_message(
                 chat_id=update.message.chat.id,
                 user_id=update.message.from_user.id,
-                message_text=update.message.text,
+                message_text=message_text,
                 message_id=update.message.message_id,
                 chat_title=chat_title,
                 username=username,
@@ -1312,7 +1394,10 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка личных сообщений"""
-    logger.info(f"📨 Получено личное сообщение от {update.message.from_user.id}: {update.message.text[:50]}...")
+    if not update or not update.message:
+        return
+        
+    logger.info(f"📨 Получено личное сообщение от {update.message.from_user.id}: {update.message.text[:50] if update.message.text else '[без текста]'}...")
     
     username = update.message.from_user.username
     if is_manager(update.message.from_user.id, username):
@@ -1339,11 +1424,12 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         # Сохраняем информацию о пользователе
         username = update.message.from_user.username
         first_name = update.message.from_user.first_name
+        message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
         
         pending_messages_manager.add_message(
             chat_id=update.message.chat.id,
             user_id=update.message.from_user.id,
-            message_text=update.message.text,
+            message_text=message_text,
             message_id=update.message.message_id,
             username=username,
             first_name=first_name
@@ -1354,12 +1440,18 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ошибок"""
     logger.error(f"💥 Ошибка при обработке сообщения: {context.error}")
     
+    # Добавляем дополнительную информацию об ошибке
+    if update:
+        logger.error(f"💥 Update object: {update}")
+        if update.message:
+            logger.error(f"💥 Message info: chat_id={update.message.chat.id}, user_id={update.message.from_user.id if update.message.from_user else 'None'}")
+    
     # Можно добавить отправку уведомления администратору об ошибке
     try:
         for admin_id in ADMIN_IDS:
             await context.bot.send_message(
                 chat_id=admin_id,
-                text=f"💥 Произошла ошибка в боте:\n\n{context.error}"
+                text=f"💥 Произошла ошибка в боте:\n\n{context.error}\n\nUpdate: {update}"
             )
     except Exception as e:
         logger.error(f"❌ Не удалось отправить уведомление об ошибке: {e}")
@@ -1408,14 +1500,16 @@ def main():
         application.add_handler(CommandHandler("managers", managers_command))
         application.add_handler(CommandHandler("stats", stats_command))
         
-        # Обработчики сообщений
+        # Обработчики сообщений - РАСШИРЕННЫЕ ФИЛЬТРЫ
         application.add_handler(MessageHandler(
-            filters.TEXT & (filters.ChatType.GROUP | filters.ChatType.SUPERGROUP), 
-            handle_group_message
+            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL, 
+            handle_group_message,
+            block=False
         ))
         application.add_handler(MessageHandler(
-            filters.TEXT & filters.ChatType.PRIVATE, 
-            handle_private_message
+            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL,
+            handle_private_message, 
+            block=False
         ))
         
         # Обработчик ошибок
@@ -1452,7 +1546,8 @@ def main():
         
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True
+            drop_pending_updates=True,
+            close_loop=False
         )
         
     except Exception as e:

@@ -82,7 +82,7 @@ class FunnelsStateManager:
         timestamp = self.state.get(f"last_funnel_{funnel_number}_check")
         if timestamp:
             return datetime.fromisoformat(timestamp)
-        return datetime.now(MOSCOW_TZ) - timedelta(days=1)  # Возвращаем старое время если нет данных
+        return datetime.now(MOSCOW_TZ) - timedelta(days=1)
     
     def add_processed_message(self, funnel_number: int, message_key: str):
         """Добавляет сообщение в список обработанных для воронки"""
@@ -118,7 +118,6 @@ class ExcludedUsersManager:
         except Exception as e:
             logger.error(f"Ошибка загрузки исключенных пользователей: {e}")
         
-        # Значения по умолчанию
         return {
             "user_ids": [433733509, 1661202178, 478084322, 868325393, 1438860417, 879901619, 6107771545, 253353687, 2113096625, 91047831, 7842709072],
             "usernames": []
@@ -134,11 +133,9 @@ class ExcludedUsersManager:
     
     def is_user_excluded(self, user_id: int, username: str = None) -> bool:
         """Проверяет, является ли пользователь исключенным"""
-        # Проверка по ID
         if user_id in self.excluded_users["user_ids"]:
             return True
         
-        # Проверка по username
         if username and username.lower() in [u.lower() for u in self.excluded_users["usernames"]]:
             return True
         
@@ -155,7 +152,6 @@ class ExcludedUsersManager:
     
     def add_username(self, username: str) -> bool:
         """Добавляет username в исключения"""
-        # Убираем @ если есть
         username = username.lstrip('@').lower()
         if username not in [u.lower() for u in self.excluded_users["usernames"]]:
             self.excluded_users["usernames"].append(username)
@@ -210,11 +206,10 @@ class FunnelsConfig:
         except Exception as e:
             logger.error(f"Ошибка загрузки конфигурации воронок: {e}")
         
-        # Значения по умолчанию
         return {
-            1: 60,    # 1 час
-            2: 180,   # 3 часа
-            3: 360    # 6 часов
+            1: 1,    # 1 минута для теста
+            2: 2,    # 2 минуты для теста  
+            3: 3     # 3 минуты для теста
         }
     
     def save_funnels(self):
@@ -244,11 +239,7 @@ class FunnelsConfig:
     
     def reset_to_default(self):
         """Сбрасывает настройки воронок к значениям по умолчанию"""
-        self.funnels = {
-            1: 60,    # 1 час
-            2: 180,   # 3 часа
-            3: 360    # 6 часов
-        }
+        self.funnels = {1: 1, 2: 2, 3: 3}
         self.save_funnels()
         logger.info("Настройки воронок сброшены к значениям по умолчанию")
 
@@ -343,10 +334,8 @@ class PendingMessagesManager:
             logger.error(f"Ошибка сохранения непрочитанных сообщений: {e}")
     
     def add_message(self, chat_id: int, user_id: int, message_text: str, message_id: int, chat_title: str = None, username: str = None, first_name: str = None):
-        # Генерируем уникальный ключ для каждого сообщения
         key = f"{chat_id}_{user_id}_{message_id}_{int(datetime.now().timestamp())}"
         
-        # Если текст сообщения пустой (например, фото/документ), создаем описание
         if not message_text:
             message_text = "[Сообщение без текста]"
         
@@ -360,14 +349,13 @@ class PendingMessagesManager:
             'first_name': first_name,
             'timestamp': datetime.now(MOSCOW_TZ).isoformat(),
             'funnels_sent': [],
-            'current_funnel': 0,  # 0 = еще не в воронке
-            'message_key': key  # Сохраняем ключ для удаления
+            'current_funnel': 0,
+            'message_key': key
         }
         self.save_pending_messages()
-        logger.info(f"✅ Добавлено непрочитанное сообщение: {key} - '{message_text[:50]}...'")
+        logger.info(f"✅ Добавлено непрочитанное сообщение: {key}")
     
     def remove_message_by_key(self, key: str):
-        """Удаляет сообщение по ключу"""
         if key in self.pending_messages:
             del self.pending_messages[key]
             self.save_pending_messages()
@@ -376,7 +364,6 @@ class PendingMessagesManager:
         return False
     
     def remove_all_chat_messages(self, chat_id: int, user_id: int = None):
-        """Удаляет все сообщения из чата (или конкретного пользователя)"""
         keys_to_remove = []
         for key, message in self.pending_messages.items():
             if message['chat_id'] == chat_id:
@@ -396,7 +383,6 @@ class PendingMessagesManager:
         return list(self.pending_messages.values())
     
     def mark_funnel_sent(self, message_key: str, funnel_number: int):
-        """Помечает, что для сообщения отправлена воронка"""
         if message_key in self.pending_messages:
             if funnel_number not in self.pending_messages[message_key]['funnels_sent']:
                 self.pending_messages[message_key]['funnels_sent'].append(funnel_number)
@@ -404,7 +390,6 @@ class PendingMessagesManager:
                 self.save_pending_messages()
     
     def find_messages_by_chat(self, chat_id: int) -> List[Dict[str, Any]]:
-        """Находит все сообщения из указанного чата"""
         result = []
         for message in self.pending_messages.values():
             if message['chat_id'] == chat_id:
@@ -412,14 +397,12 @@ class PendingMessagesManager:
         return result
     
     def get_messages_for_funnel(self, funnel_number: int, funnels_state: FunnelsStateManager) -> List[Dict[str, Any]]:
-        """Возвращает сообщения, готовые для отправки в указанную воронку"""
         result = []
         now = datetime.now(MOSCOW_TZ)
         FUNNELS = self.funnels_config.get_funnels()
         funnel_minutes = FUNNELS[funnel_number]
         
         for message_key, message in self.pending_messages.items():
-            # Пропускаем сообщения, уже обработанные этой воронкой
             if funnels_state.is_message_processed(funnel_number, message_key):
                 continue
                 
@@ -430,9 +413,7 @@ class PendingMessagesManager:
             current_funnel = message.get('current_funnel', 0)
             funnels_sent = message.get('funnels_sent', [])
             
-            # Логика для каждой воронки:
             if funnel_number == 1:
-                # Первая воронка: сообщение подходит если прошло >= 1 час И еще не было воронок
                 if (minutes_passed >= funnel_minutes and 
                     current_funnel == 0 and 
                     funnel_number not in funnels_sent):
@@ -441,7 +422,6 @@ class PendingMessagesManager:
                     result.append(message)
                     
             elif funnel_number == 2:
-                # Вторая воронка: сообщение подходит если прошло >= 3 часа И уже была в 1-й воронке И еще не было во 2-й
                 if (minutes_passed >= funnel_minutes and 
                     1 in funnels_sent and 
                     funnel_number not in funnels_sent):
@@ -450,7 +430,6 @@ class PendingMessagesManager:
                     result.append(message)
                     
             elif funnel_number == 3:
-                # Третья воронка: сообщение подходит если прошло >= 6 часов И уже была во 2-й воронке И еще не было в 3-й
                 if (minutes_passed >= funnel_minutes and 
                     2 in funnels_sent and 
                     funnel_number not in funnels_sent):
@@ -461,7 +440,6 @@ class PendingMessagesManager:
         return result
     
     def get_all_messages_older_than(self, minutes_threshold: int) -> List[Dict[str, Any]]:
-        """Возвращает все сообщения, которые ждут ответа дольше указанного времени в минутах"""
         result = []
         now = datetime.now(MOSCOW_TZ)
         
@@ -505,7 +483,6 @@ def is_excluded_user(user_id: int) -> bool:
     return excluded_users_manager.is_user_excluded(user_id)
 
 def is_working_hours():
-    """Проверяет, находится ли текущее время в рабочем интервале (10:00-19:00)"""
     now = datetime.now(MOSCOW_TZ)
     current_time = now.time()
     if current_time >= time(10, 0) and current_time <= time(19, 0):
@@ -513,7 +490,6 @@ def is_working_hours():
     return False
 
 def should_respond_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Определяет, нужно ли обрабатывать сообщение"""
     if not update or not update.message:
         return False
     
@@ -535,14 +511,12 @@ def should_respond_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if update.message.text and update.message.text.startswith('/'):
         return False
         
-    # Разрешаем обработку сообщений без текста (фото, документы и т.д.)
     if update.message.text and len(update.message.text.strip()) < 1:
         return False
         
     return True
 
 def get_chat_display_name(chat_data: Dict[str, Any]) -> str:
-    """Получает отображаемое название чата из данных сообщения"""
     chat_title = chat_data.get('chat_title')
     username = chat_data.get('username')
     first_name = chat_data.get('first_name')
@@ -557,16 +531,10 @@ def get_chat_display_name(chat_data: Dict[str, Any]) -> str:
         return f"💬 Чат {chat_data['chat_id']}"
 
 def get_funnel_emoji(funnel_number: int) -> str:
-    """Возвращает эмодзи для воронки"""
-    emojis = {
-        1: "🟡",  # Желтый - первая воронка
-        2: "🟠",  # Оранжевый - вторая воронка  
-        3: "🔴"   # Красный - третья воронка
-    }
+    emojis = {1: "🟡", 2: "🟠", 3: "🔴"}
     return emojis.get(funnel_number, "⚪")
 
 def format_time_ago(timestamp: str) -> str:
-    """Форматирует время в читаемый формат"""
     message_time = datetime.fromisoformat(timestamp)
     now = datetime.now(MOSCOW_TZ)
     time_diff = now - message_time
@@ -580,7 +548,6 @@ def format_time_ago(timestamp: str) -> str:
         return f"{minutes}м"
 
 def minutes_to_hours_minutes(minutes: int) -> str:
-    """Конвертирует минуты в формат 'X ч Y м'"""
     hours = minutes // 60
     mins = minutes % 60
     if hours > 0:
@@ -591,7 +558,6 @@ def minutes_to_hours_minutes(minutes: int) -> str:
 # ========== КОМАНДЫ ДЛЯ УПРАВЛЕНИЯ ИСКЛЮЧЕНИЯМИ ==========
 
 async def add_exception_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Добавляет пользователя в исключения"""
     if not update or not update.message:
         return
         
@@ -600,32 +566,24 @@ async def add_exception_command(update: Update, context: ContextTypes.DEFAULT_TY
         return
     
     if not context.args:
-        await update.message.reply_text(
-            "❌ Использование:\n"
-            "Добавить по ID: `/add_exception 123456789`\n"
-            "Добавить по username: `/add_exception @username`"
-        )
+        await update.message.reply_text("❌ Использование: /add_exception <ID или @username>")
         return
     
     identifier = context.args[0]
     
-    # Проверяем, это ID или username
     if identifier.isdigit():
-        # Это ID
         user_id = int(identifier)
         if excluded_users_manager.add_user_id(user_id):
             await update.message.reply_text(f"✅ ID `{user_id}` добавлен в исключения")
         else:
             await update.message.reply_text(f"ℹ️ ID `{user_id}` уже в исключениях")
     else:
-        # Это username
         if excluded_users_manager.add_username(identifier):
             await update.message.reply_text(f"✅ Username `{identifier}` добавлен в исключения")
         else:
             await update.message.reply_text(f"ℹ️ Username `{identifier}` уже в исключениях")
 
 async def remove_exception_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Удаляет пользователя из исключений"""
     if not update or not update.message:
         return
         
@@ -634,32 +592,24 @@ async def remove_exception_command(update: Update, context: ContextTypes.DEFAULT
         return
     
     if not context.args:
-        await update.message.reply_text(
-            "❌ Использование:\n"
-            "Удалить по ID: `/remove_exception 123456789`\n"
-            "Удалить по username: `/remove_exception @username`"
-        )
+        await update.message.reply_text("❌ Использование: /remove_exception <ID или @username>")
         return
     
     identifier = context.args[0]
     
-    # Проверяем, это ID или username
     if identifier.isdigit():
-        # Это ID
         user_id = int(identifier)
         if excluded_users_manager.remove_user_id(user_id):
             await update.message.reply_text(f"✅ ID `{user_id}` удален из исключений")
         else:
             await update.message.reply_text(f"❌ ID `{user_id}` не найден в исключениях")
     else:
-        # Это username
         if excluded_users_manager.remove_username(identifier):
             await update.message.reply_text(f"✅ Username `{identifier}` удален из исключений")
         else:
             await update.message.reply_text(f"❌ Username `{identifier}` не найден в исключениях")
 
 async def list_exceptions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает список всех исключений"""
     if not update or not update.message:
         return
         
@@ -691,7 +641,6 @@ async def list_exceptions_command(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text(text, parse_mode='Markdown')
 
 async def clear_exceptions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Очищает все исключения"""
     if not update or not update.message:
         return
         
@@ -705,7 +654,6 @@ async def clear_exceptions_command(update: Update, context: ContextTypes.DEFAULT
 # ========== КОМАНДЫ ДЛЯ УПРАВЛЕНИЯ ВОРОНКАМИ ==========
 
 async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /funnels - показывает текущие настройки воронок"""
     if not update or not update.message:
         return
         
@@ -736,7 +684,6 @@ async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(funnels_text, parse_mode='Markdown')
 
 async def set_funnel_1_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /set_funnel_1"""
     if not update or not update.message:
         return
         
@@ -759,7 +706,6 @@ async def set_funnel_1_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("❌ Ошибка установки интервала воронки")
 
 async def set_funnel_2_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /set_funnel_2"""
     if not update or not update.message:
         return
         
@@ -782,7 +728,6 @@ async def set_funnel_2_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("❌ Ошибка установки интервала воронки")
 
 async def set_funnel_3_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /set_funnel_3"""
     if not update or not update.message:
         return
         
@@ -805,7 +750,6 @@ async def set_funnel_3_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("❌ Ошибка установки интервала воронки")
 
 async def reset_funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /reset_funnels"""
     if not update or not update.message:
         return
         
@@ -819,7 +763,6 @@ async def reset_funnels_command(update: Update, context: ContextTypes.DEFAULT_TY
 # ========== ОСНОВНЫЕ КОМАНДЫ ==========
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
     if not update or not update.message:
         return
         
@@ -840,7 +783,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /help"""
     if not update or not update.message:
         return
         
@@ -887,7 +829,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /status"""
     if not update or not update.message:
         return
         
@@ -921,7 +862,6 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(status_text, parse_mode='Markdown')
 
 async def set_work_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /set_work_chat"""
     if not update or not update.message:
         return
         
@@ -936,7 +876,6 @@ async def set_work_chat_command(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("❌ Ошибка сохранения рабочего чата")
 
 async def managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /managers"""
     if not update or not update.message:
         return
         
@@ -968,7 +907,6 @@ async def managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode='Markdown')
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /stats"""
     if not update or not update.message:
         return
         
@@ -980,14 +918,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     excluded_users = excluded_users_manager.get_all_excluded()
     total_excluded = len(excluded_users["user_ids"]) + len(excluded_users["usernames"])
     
-    # Анализируем сообщения по времени
     now = datetime.now(MOSCOW_TZ)
-    time_stats = {
-        "менее 1 часа": 0,
-        "1-3 часа": 0,
-        "3-6 часов": 0,
-        "более 6 часов": 0
-    }
+    time_stats = {"менее 1 часа": 0, "1-3 часа": 0, "3-6 часов": 0, "более 6 часов": 0}
     
     for message in all_pending:
         timestamp = datetime.fromisoformat(message['timestamp'])
@@ -1023,34 +955,31 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(stats_text, parse_mode='Markdown')
 
-# ========== УЛУЧШЕННАЯ СИСТЕМА ВОРОНОК ==========
+# ========== ИСПРАВЛЕННАЯ СИСТЕМА ВОРОНОК ==========
 
 async def send_funnel_notification(context: ContextTypes.DEFAULT_TYPE, funnel_number: int, messages: List[Dict[str, Any]]):
     """Отправляет уведомление воронки в рабочий чат"""
     work_chat_id = work_chat_manager.get_work_chat_id()
     if not work_chat_id:
         logger.error("❌ Не могу отправить уведомление воронки: рабочий чат не установлен")
-        return
+        return False
     
     FUNNELS = funnels_config.get_funnels()
     funnel_emoji = get_funnel_emoji(funnel_number)
     funnel_minutes = FUNNELS[funnel_number]
     
-    # Определяем текст в зависимости от времени
     time_text = minutes_to_hours_minutes(funnel_minutes).upper()
     
-    # Заголовок уведомления в зависимости от воронки
     if funnel_number == 1:
         header = f"{funnel_emoji} <b>ВОРОНКА 1: СООБЩЕНИЯ ЖДУТ ОТВЕТА {time_text}</b>"
         description = f"📊 Новых сообщений: <b>{len(messages)}</b>"
     elif funnel_number == 2:
         header = f"{funnel_emoji} <b>ВОРОНКА 2: СООБЩЕНИЯ ЖДУТ ОТВЕТА {time_text}</b>"
         description = f"📊 Сообщений требует внимания: <b>{len(messages)}</b>"
-    else:  # funnel_number == 3
+    else:
         header = f"{funnel_emoji} <b>ВОРОНКА 3: СРОЧНЫЕ СООБЩЕНИЯ ЖДУТ ОТВЕТА {time_text}</b>"
         description = f"📊 Срочных сообщений: <b>{len(messages)}</b>"
     
-    # Группируем сообщения по чатам для лучшего отображения
     chats_messages = {}
     for message in messages:
         chat_id = message['chat_id']
@@ -1058,15 +987,8 @@ async def send_funnel_notification(context: ContextTypes.DEFAULT_TYPE, funnel_nu
             chats_messages[chat_id] = []
         chats_messages[chat_id].append(message)
     
-    notification_text = f"""
-{header}
-
-{description}
-
-📋 <b>Список чатов с непрочитанными сообщениями:</b>
-"""
+    notification_text = f"{header}\n\n{description}\n\n📋 <b>Список чатов с непрочитанными сообщениями:</b>\n"
     
-    # Добавляем информацию по каждому чату
     chat_number = 1
     for chat_id, chat_messages in chats_messages.items():
         first_message = chat_messages[0]
@@ -1075,19 +997,17 @@ async def send_funnel_notification(context: ContextTypes.DEFAULT_TYPE, funnel_nu
         notification_text += f"\n{chat_number}. {chat_display}"
         notification_text += f"\n   📝 Сообщений: {len(chat_messages)}"
         
-        # Показываем время самого старого сообщения в чате
         oldest_timestamp = min(msg['timestamp'] for msg in chat_messages)
         time_ago = format_time_ago(oldest_timestamp)
         notification_text += f"\n   ⏰ Самое старое: {time_ago} назад"
         
-        # Показываем все сообщения из этого чата (первые 5)
-        for i, msg in enumerate(chat_messages[:5]):
+        for i, msg in enumerate(chat_messages[:3]):
             user_info = f"@{msg['username']}" if msg.get('username') else f"ID:{msg['user_id']}"
-            message_preview = msg['message_text'][:80] + "..." if len(msg['message_text']) > 80 else msg['message_text']
+            message_preview = msg['message_text'][:50] + "..." if len(msg['message_text']) > 50 else msg['message_text']
             notification_text += f"\n      {i+1}. {user_info}: {message_preview}"
         
-        if len(chat_messages) > 5:
-            notification_text += f"\n      ... и еще {len(chat_messages) - 5} сообщ."
+        if len(chat_messages) > 3:
+            notification_text += f"\n      ... и еще {len(chat_messages) - 3} сообщ."
         
         notification_text += f"\n"
         chat_number += 1
@@ -1097,14 +1017,15 @@ async def send_funnel_notification(context: ContextTypes.DEFAULT_TYPE, funnel_nu
     try:
         await context.bot.send_message(chat_id=work_chat_id, text=notification_text, parse_mode='HTML')
         
-        # Помечаем сообщения как обработанные в этой воронке
         for message_data in messages:
             pending_messages_manager.mark_funnel_sent(message_data['message_key'], funnel_number)
             funnels_state_manager.add_processed_message(funnel_number, message_data['message_key'])
         
         logger.info(f"✅ Уведомление воронки {funnel_number} отправлено в рабочий чат. Чатов: {len(chats_messages)}, Сообщений: {len(messages)}")
+        return True
     except Exception as e:
         logger.error(f"❌ Ошибка отправки уведомления воронки {funnel_number}: {e}")
+        return False
 
 async def check_funnel_messages(context: ContextTypes.DEFAULT_TYPE, funnel_number: int):
     """Проверяет и отправляет уведомления для конкретной воронки"""
@@ -1113,32 +1034,27 @@ async def check_funnel_messages(context: ContextTypes.DEFAULT_TYPE, funnel_numbe
         logger.warning("❌ Рабочий чат не установлен!")
         return
     
-    if not is_working_hours():
-        logger.warning("❌ Сейчас нерабочее время - уведомления не отправляются")
-        return
+    # УБРАЛ ПРОВЕРКУ РАБОЧЕГО ВРЕМЕНИ - уведомления должны приходить всегда!
     
     FUNNELS = funnels_config.get_funnels()
     funnel_minutes = FUNNELS[funnel_number]
     
-    # Получаем время последней проверки для этой воронки
     last_check = funnels_state_manager.get_last_check(funnel_number)
     now = datetime.now(MOSCOW_TZ)
     time_since_last_check = now - last_check
     
-    # Проверяем, прошло ли достаточно времени с последней проверки
-    check_interval = timedelta(minutes=min(60, funnel_minutes))
+    # УМЕНЬШИЛ ИНТЕРВАЛ ПРОВЕРКИ ДО 30 СЕКУНД
+    check_interval = timedelta(seconds=30)
     
     if time_since_last_check < check_interval:
-        logger.info(f"⏰ Воронка {funnel_number}: проверка пропущена, прошло только {int(time_since_last_check.total_seconds() / 60)} мин.")
+        logger.info(f"⏰ Воронка {funnel_number}: проверка пропущена")
         return
     
     logger.info(f"🔍 Проверка воронки {funnel_number} (интервал: {funnel_minutes} мин)")
     
-    # Получаем сообщения для этой воронки
     messages_for_funnel = pending_messages_manager.get_messages_for_funnel(funnel_number, funnels_state_manager)
     
     if messages_for_funnel:
-        # Группируем сообщения по чатам для логирования
         chats_in_funnel = {}
         for msg in messages_for_funnel:
             chat_id = msg['chat_id']
@@ -1152,26 +1068,26 @@ async def check_funnel_messages(context: ContextTypes.DEFAULT_TYPE, funnel_numbe
             chat_display = get_chat_display_name(chat_messages[0])
             logger.info(f"  📝 {chat_display}: {len(chat_messages)} сообщ.")
         
-        await send_funnel_notification(context, funnel_number, messages_for_funnel)
+        success = await send_funnel_notification(context, funnel_number, messages_for_funnel)
         
-        # Обновляем время последней проверки
-        funnels_state_manager.update_last_check(funnel_number)
+        if success:
+            funnels_state_manager.update_last_check(funnel_number)
+        else:
+            logger.error(f"❌ Не удалось отправить уведомление воронки {funnel_number}")
     else:
-        logger.info(f"✅ Воронка {funnel_number}: нет новых сообщений для уведомления")
+        logger.info(f"✅ Воронка {funnel_number}: нет сообщений для уведомления")
 
 async def check_all_funnels(context: ContextTypes.DEFAULT_TYPE):
     """Проверяет все воронки по очереди"""
     logger.info("🔄 Запуск проверки всех воронок...")
     
-    # Проверяем каждую воронку
     for funnel_number in [1, 2, 3]:
         await check_funnel_messages(context, funnel_number)
-        await asyncio.sleep(1)  # Небольшая пауза между проверками
+        await asyncio.sleep(1)
 
 # ========== КОМАНДЫ ДЛЯ РУЧНОЙ ПРОВЕРКИ ВОРОНОК ==========
 
 async def check_voronka_1_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ручная проверка воронки 1"""
     if not update or not update.message:
         return
         
@@ -1184,7 +1100,6 @@ async def check_voronka_1_command(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text("✅ Проверка воронки 1 завершена")
 
 async def check_voronka_2_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ручная проверка воронки 2"""
     if not update or not update.message:
         return
         
@@ -1197,7 +1112,6 @@ async def check_voronka_2_command(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text("✅ Проверка воронки 2 завершена")
 
 async def check_voronka_3_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ручная проверка воронки 3"""
     if not update or not update.message:
         return
         
@@ -1210,7 +1124,6 @@ async def check_voronka_3_command(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text("✅ Проверка воронки 3 завершена")
 
 async def check_all_voronki_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ручная проверка всех воронок"""
     if not update or not update.message:
         return
         
@@ -1223,7 +1136,6 @@ async def check_all_voronki_command(update: Update, context: ContextTypes.DEFAUL
     await update.message.reply_text("✅ Проверка всех воронок завершена")
 
 async def force_funnel_check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Принудительная проверка воронок (игнорирует временные ограничения)"""
     if not update or not update.message:
         return
         
@@ -1236,32 +1148,20 @@ async def force_funnel_check_command(update: Update, context: ContextTypes.DEFAU
     response_text = "🔍 **ПРИНУДИТЕЛЬНАЯ ПРОВЕРКА ВОРОНОК**\n\n"
     
     for funnel_num in [1, 2, 3]:
-        threshold = FUNNELS[funnel_num]
-        messages = pending_messages_manager.get_all_messages_older_than(threshold)
+        messages = pending_messages_manager.get_messages_for_funnel(funnel_num, funnels_state_manager)
+        chats_count = len(set(msg['chat_id'] for msg in messages))
         
-        if funnel_num == 1:
-            filtered_messages = [msg for msg in messages if msg.get('current_funnel', 0) == 0]
-        elif funnel_num == 2:
-            filtered_messages = [msg for msg in messages if 1 in msg.get('funnels_sent', [])]
-        else:  # funnel_num == 3
-            filtered_messages = [msg for msg in messages if 2 in msg.get('funnels_sent', [])]
-        
-        # Группируем по чатам
-        chats_count = len(set(msg['chat_id'] for msg in filtered_messages))
-        
-        response_text += f"{get_funnel_emoji(funnel_num)} **Воронка {funnel_num}** ({minutes_to_hours_minutes(threshold)}):\n"
-        response_text += f"   📝 Сообщений: {len(filtered_messages)}\n"
+        response_text += f"{get_funnel_emoji(funnel_num)} **Воронка {funnel_num}** ({minutes_to_hours_minutes(FUNNELS[funnel_num])}):\n"
+        response_text += f"   📝 Сообщений: {len(messages)}\n"
         response_text += f"   💬 Чатов: {chats_count}\n\n"
     
     await update.message.reply_text(response_text, parse_mode='Markdown')
     
-    # Запускаем фактическую отправку уведомлений
     await check_all_funnels(context)
 
 # ========== КОМАНДЫ ДЛЯ РУЧНОГО УПРАВЛЕНИЯ СООБЩЕНИЯМИ ==========
 
 async def clear_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ручное удаление всех сообщений из текущего чата"""
     if not update or not update.message:
         return
         
@@ -1278,7 +1178,6 @@ async def clear_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("✅ В этом чате нет непрочитанных сообщений")
 
 async def clear_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ручное удаление всех сообщений из всех чатов"""
     if not update or not update.message:
         return
         
@@ -1290,7 +1189,6 @@ async def clear_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Удалены все непрочитанные сообщения ({removed_count} шт.)")
 
 async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает все непрочитанные сообщения"""
     if not update or not update.message:
         return
         
@@ -1304,7 +1202,6 @@ async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Нет непрочитанных сообщений")
         return
     
-    # Группируем по чатам
     chats_messages = {}
     for message in all_pending:
         chat_id = message['chat_id']
@@ -1328,10 +1225,54 @@ async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(pending_text, parse_mode='Markdown')
 
-# ========== ОБРАБОТЧИКИ СООБЩЕНИЙ (БЕЗ АВТОМАТИЧЕСКОГО УДАЛЕНИЯ) ==========
+# ========== ДЕБАГ КОМАНДЫ ==========
+
+async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    debug_text = f"""
+🔧 **ДЕБАГ ИНФОРМАЦИЯ**
+
+💬 Рабочий чат: {work_chat_manager.get_work_chat_id() or '❌ Не установлен'}
+📋 Сообщений в памяти: {len(pending_messages_manager.pending_messages)}
+🕐 Текущее время: {datetime.now(MOSCOW_TZ).strftime('%H:%M:%S')}
+🏢 Рабочие часы: {'✅ Да' if is_working_hours() else '❌ Нет'}
+
+📊 **Статус воронок:**
+"""
+    
+    for funnel_num in [1, 2, 3]:
+        messages = pending_messages_manager.get_messages_for_funnel(funnel_num, funnels_state_manager)
+        last_check = funnels_state_manager.get_last_check(funnel_num)
+        debug_text += f"🟡 Воронка {funnel_num}: {len(messages)} сообщ. | Последняя проверка: {last_check.strftime('%H:%M:%S')}\n"
+    
+    await update.message.reply_text(debug_text)
+
+async def test_funnel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    await update.message.reply_text("🧪 Запускаю тест воронок...")
+    
+    for funnel_num in [1, 2, 3]:
+        messages = pending_messages_manager.get_messages_for_funnel(funnel_num, funnels_state_manager)
+        await update.message.reply_text(f"🟡 Воронка {funnel_num}: {len(messages)} сообщений готово к отправке")
+    
+    await check_all_funnels(context)
+    await update.message.reply_text("✅ Тест воронок завершен")
+
+# ========== ОБРАБОТЧИКИ СООБЩЕНИЙ ==========
 
 async def handle_manager_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка ответов менеджеров - БЕЗ удаления сообщений"""
     if not update or not update.message:
         return
         
@@ -1343,10 +1284,9 @@ async def handle_manager_reply(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     
     chat_id = update.message.chat.id
-    logger.info(f"🔍 Менеджер ответил в чате {chat_id}, но сообщения НЕ удаляются")
+    logger.info(f"🔍 Менеджер ответил в чате {chat_id}")
 
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка сообщений в группах"""
     if not update or not update.message:
         return
         
@@ -1375,7 +1315,6 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             if flags_manager.has_replied(replied_key):
                 flags_manager.clear_replied(replied_key)
             
-            # Сохраняем информацию о чате и пользователе
             chat_title = update.message.chat.title
             username = update.message.from_user.username
             first_name = update.message.from_user.first_name
@@ -1393,7 +1332,6 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.info(f"✅ Добавлено в непрочитанные: чат '{chat_title}', пользователь {update.message.from_user.id}")
 
 async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка личных сообщений"""
     if not update or not update.message:
         return
         
@@ -1421,7 +1359,6 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         if flags_manager.has_replied(replied_key):
             flags_manager.clear_replied(replied_key)
         
-        # Сохраняем информацию о пользователе
         username = update.message.from_user.username
         first_name = update.message.from_user.first_name
         message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
@@ -1437,21 +1374,18 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         logger.info(f"✅ Добавлено в непрочитанные: пользователь {first_name or username or user_id}")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик ошибок"""
     logger.error(f"💥 Ошибка при обработке сообщения: {context.error}")
     
-    # Добавляем дополнительную информацию об ошибке
     if update:
         logger.error(f"💥 Update object: {update}")
         if update.message:
             logger.error(f"💥 Message info: chat_id={update.message.chat.id}, user_id={update.message.from_user.id if update.message.from_user else 'None'}")
     
-    # Можно добавить отправку уведомления администратору об ошибке
     try:
         for admin_id in ADMIN_IDS:
             await context.bot.send_message(
                 chat_id=admin_id,
-                text=f"💥 Произошла ошибка в боте:\n\n{context.error}\n\nUpdate: {update}"
+                text=f"💥 Произошла ошибка в боте:\n\n{context.error}"
             )
     except Exception as e:
         logger.error(f"❌ Не удалось отправить уведомление об ошибке: {e}")
@@ -1460,9 +1394,8 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     try:
-        # Выводим информацию о запуске
         print("=" * 50)
-        print("🤖 ЗАПУСК БОТА-АВТООТВЕТЧИКА (СООБЩЕНИЯ НЕ УДАЛЯЮТСЯ АВТОМАТИЧЕСКИ)")
+        print("🤖 ЗАПУСК БОТА-АВТООТВЕТЧИКА")
         print("=" * 50)
         
         application = Application.builder().token(BOT_TOKEN).build()
@@ -1480,6 +1413,10 @@ def main():
         application.add_handler(CommandHandler("check_voronka_3", check_voronka_3_command))
         application.add_handler(CommandHandler("check_all_voronki", check_all_voronki_command))
         application.add_handler(CommandHandler("force_funnel_check", force_funnel_check_command))
+        
+        # Дебаг команды
+        application.add_handler(CommandHandler("debug", debug_command))
+        application.add_handler(CommandHandler("test_funnel", test_funnel_command))
         
         # Команды для управления исключениями
         application.add_handler(CommandHandler("add_exception", add_exception_command))
@@ -1500,7 +1437,7 @@ def main():
         application.add_handler(CommandHandler("managers", managers_command))
         application.add_handler(CommandHandler("stats", stats_command))
         
-        # Обработчики сообщений - РАСШИРЕННЫЕ ФИЛЬТРЫ
+        # Обработчики сообщений
         application.add_handler(MessageHandler(
             filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL, 
             handle_group_message,
@@ -1515,11 +1452,11 @@ def main():
         # Обработчик ошибок
         application.add_error_handler(error_handler)
         
-        # Периодическая проверка воронок (каждые 5 минут)
+        # Периодическая проверка воронок (каждые 30 секунд для теста)
         job_queue = application.job_queue
         if job_queue:
-            job_queue.run_repeating(check_all_funnels, interval=300, first=10)  # 5 минут
-            print("✅ Планировщик задач запущен (интервал: 5 минут)")
+            job_queue.run_repeating(check_all_funnels, interval=30, first=5)
+            print("✅ Планировщик задач запущен (интервал: 30 секунд)")
         else:
             print("❌ Планировщик задач недоступен")
         
@@ -1531,10 +1468,8 @@ def main():
         print("🚀 Бот запускается...")
         print(f"📊 Загружено флагов: {flags_manager.count_flags()}")
         print(f"📋 Непрочитанных сообщений: {len(pending_messages_manager.get_all_pending_messages())}")
-        print(f"👥 Менеджеров в системе: {total_excluded} ({len(excluded_users['user_ids'])} ID + {len(excluded_users['usernames'])} username)")
-        print(f"⚙️ Воронки уведомлений:")
-        for funnel_num, minutes in FUNNELS.items():
-            print(f"   - Воронка {funnel_num}: {minutes} мин ({minutes_to_hours_minutes(minutes)})")
+        print(f"👥 Менеджеров в системе: {total_excluded}")
+        print(f"⚙️ Воронки уведомлений: {FUNNELS}")
         
         if work_chat_manager.is_work_chat_set():
             print(f"💬 Рабочий чат установлен: {work_chat_manager.get_work_chat_id()}")
@@ -1546,7 +1481,7 @@ def main():
         
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
+            drop_pending_updates=False,
             close_loop=False
         )
         
@@ -1556,4 +1491,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

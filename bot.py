@@ -38,6 +38,134 @@ PENDING_MESSAGES_FILE = "pending_messages.json"
 FUNNELS_CONFIG_FILE = "funnels_config.json"
 EXCLUDED_USERS_FILE = "excluded_users.json"
 FUNNELS_STATE_FILE = "funnels_state.json"
+NOTIFICATIONS_FILE = "notifications.json"
+
+# ========== КЛАСС ДЛЯ УПРАВЛЕНИЯ УВЕДОМЛЕНИЯМИ ==========
+
+class NotificationManager:
+    def __init__(self):
+        self.notifications = self.load_notifications()
+    
+    def load_notifications(self) -> Dict[str, Any]:
+        """Загружает уведомления из файла"""
+        try:
+            if os.path.exists(NOTIFICATIONS_FILE):
+                with open(NOTIFICATIONS_FILE, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.error(f"Ошибка загрузки уведомлений: {e}")
+        return {}
+    
+    def save_notifications(self):
+        """Сохраняет уведомления в файл"""
+        try:
+            with open(NOTIFICATIONS_FILE, 'w') as f:
+                json.dump(self.notifications, f, indent=2)
+        except Exception as e:
+            logger.error(f"Ошибка сохранения уведомлений: {e}")
+    
+    def add_notification(self, funnel_number: int, message_id: int, chat_messages: Dict[int, List[Dict[str, Any]]]):
+        """Добавляет или обновляет уведомление воронки"""
+        key = f"funnel_{funnel_number}"
+        
+        self.notifications[key] = {
+            'work_chat_message_id': message_id,
+            'funnel_number': funnel_number,
+            'chat_messages': {},  # {chat_id: [message_keys]}
+            'timestamp': datetime.now(MOSCOW_TZ).isoformat()
+        }
+        
+        # Сохраняем информацию о чатах и сообщениях
+        for chat_id, messages in chat_messages.items():
+            self.notifications[key]['chat_messages'][str(chat_id)] = [
+                msg['message_key'] for msg in messages
+            ]
+        
+        self.save_notifications()
+        logger.info(f"✅ Добавлено уведомление воронки {funnel_number}")
+        return key
+    
+    async def remove_chat_from_notification(self, funnel_number: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE):
+        """Удаляет чат из уведомления и обновляет сообщение в рабочем чате"""
+        key = f"funnel_{funnel_number}"
+        
+        if key not in self.notifications:
+            return False
+        
+        notification = self.notifications[key]
+        work_chat_id = work_chat_manager.get_work_chat_id()
+        
+        if not work_chat_id:
+            logger.error("❌ Рабочий чат не установлен")
+            return False
+        
+        # Удаляем чат из уведомления
+        if str(chat_id) in notification['chat_messages']:
+            del notification['chat_messages'][str(chat_id)]
+            
+            # Если чатов не осталось - удаляем всё уведомление
+            if not notification['chat_messages']:
+                self.remove_notification(key)
+                try:
+                    # Удаляем сообщение из рабочего чата
+                    await context.bot.delete_message(
+                        chat_id=work_chat_id,
+                        message_id=notification['work_chat_message_id']
+                    )
+                    logger.info(f"✅ Удалено уведомление воронки {funnel_number} (чатов не осталось)")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка удаления сообщения: {e}")
+                return True
+            
+            # Если чаты остались - обновляем сообщение
+            try:
+                # Получаем актуальные данные о сообщениях
+                remaining_chats = {}
+                for remaining_chat_id in notification['chat_messages'].keys():
+                    chat_id_int = int(remaining_chat_id)
+                    messages = pending_messages_manager.find_messages_by_chat(chat_id_int)
+                    if messages:
+                        remaining_chats[chat_id_int] = messages
+                
+                # Создаем обновленный текст уведомления
+                updated_text = create_funnel_notification_text(funnel_number, remaining_chats)
+                
+                # Редактируем сообщение в рабочем чате
+                await context.bot.edit_message_text(
+                    chat_id=work_chat_id,
+                    message_id=notification['work_chat_message_id'],
+                    text=updated_text
+                )
+                
+                # Обновляем данные уведомления
+                self.notifications[key]['chat_messages'] = {
+                    str(chat_id): [msg['message_key'] for msg in messages] 
+                    for chat_id, messages in remaining_chats.items()
+                }
+                self.save_notifications()
+                
+                logger.info(f"✅ Обновлено уведомление воронки {funnel_number}, удален чат {chat_id}")
+                return True
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка обновления уведомления: {e}")
+                return False
+        
+        return False
+    
+    def remove_notification(self, notification_key: str):
+        """Удаляет уведомление"""
+        if notification_key in self.notifications:
+            del self.notifications[notification_key]
+            self.save_notifications()
+            logger.info(f"✅ Удалено уведомление: {notification_key}")
+            return True
+        return False
+    
+    def get_notification_by_funnel(self, funnel_number: int):
+        """Возвращает уведомление для указанной воронки"""
+        key = f"funnel_{funnel_number}"
+        return self.notifications.get(key)
 
 # ========== КЛАСС ДЛЯ УПРАВЛЕНИЯ СОСТОЯНИЕМ ВОРОНОК ==========
 
@@ -206,11 +334,11 @@ class FunnelsConfig:
         except Exception as e:
             logger.error(f"Ошибка загрузки конфигурации воронок: {e}")
         
-        # Изменены интервалы на часы
+        # Установлены реалистичные интервалы для тестирования
         return {
-            1: 60,    # 1 час
-            2: 180,   # 3 часа  
-            3: 300    # 5 часов
+            1: 1,    # 1 минута для теста
+            2: 2,    # 2 минуты для теста  
+            3: 3     # 3 минуты для теста
         }
     
     def save_funnels(self):
@@ -240,7 +368,7 @@ class FunnelsConfig:
     
     def reset_to_default(self):
         """Сбрасывает настройки воронок к значениям по умолчанию"""
-        self.funnels = {1: 60, 2: 180, 3: 300}
+        self.funnels = {1: 60, 2: 120, 3: 180}  # 1ч, 2ч, 3ч по умолчанию
         self.save_funnels()
         logger.info("Настройки воронок сброшены к значениям по умолчанию")
 
@@ -350,7 +478,7 @@ class PendingMessagesManager:
             'first_name': first_name,
             'timestamp': datetime.now(MOSCOW_TZ).isoformat(),
             'funnels_sent': [],
-            'current_funnel': 0,
+            'current_funnel': 0,  # 0 = не обработано ни одной воронкой
             'message_key': key
         }
         self.save_pending_messages()
@@ -387,8 +515,10 @@ class PendingMessagesManager:
         if message_key in self.pending_messages:
             if funnel_number not in self.pending_messages[message_key]['funnels_sent']:
                 self.pending_messages[message_key]['funnels_sent'].append(funnel_number)
+                # ОБНОВЛЯЕМ ТЕКУЩУЮ ВОРОНКУ - сообщение переходит в следующую воронку
                 self.pending_messages[message_key]['current_funnel'] = funnel_number
                 self.save_pending_messages()
+                logger.info(f"✅ Сообщение {message_key} перешло в воронку {funnel_number}")
     
     def find_messages_by_chat(self, chat_id: int) -> List[Dict[str, Any]]:
         result = []
@@ -404,6 +534,7 @@ class PendingMessagesManager:
         funnel_minutes = FUNNELS[funnel_number]
         
         for message_key, message in self.pending_messages.items():
+            # Пропускаем сообщения, уже обработанные этой воронкой
             if funnels_state.is_message_processed(funnel_number, message_key):
                 continue
                 
@@ -414,26 +545,31 @@ class PendingMessagesManager:
             current_funnel = message.get('current_funnel', 0)
             funnels_sent = message.get('funnels_sent', [])
             
+            # ВОРОНКА 1: только сообщения, которые еще не прошли ни через одну воронку
             if funnel_number == 1:
                 if (minutes_passed >= funnel_minutes and 
-                    current_funnel == 0 and 
+                    current_funnel == 0 and  # еще не обработано ни одной воронкой
                     funnel_number not in funnels_sent):
                     message['message_key'] = message_key
                     message['minutes_passed'] = minutes_passed
                     result.append(message)
                     
+            # ВОРОНКА 2: только сообщения, которые прошли через воронку 1, но еще не через воронку 2
             elif funnel_number == 2:
                 if (minutes_passed >= funnel_minutes and 
-                    1 in funnels_sent and 
-                    funnel_number not in funnels_sent):
+                    1 in funnels_sent and  # прошла воронка 1
+                    2 not in funnels_sent and  # еще не прошла воронку 2
+                    current_funnel == 1):  # текущая воронка - 1
                     message['message_key'] = message_key
                     message['minutes_passed'] = minutes_passed
                     result.append(message)
                     
+            # ВОРОНКА 3: только сообщения, которые прошли через воронку 2, но еще не через воронку 3
             elif funnel_number == 3:
                 if (minutes_passed >= funnel_minutes and 
-                    2 in funnels_sent and 
-                    funnel_number not in funnels_sent):
+                    2 in funnels_sent and  # прошла воронка 2
+                    3 not in funnels_sent and  # еще не прошла воронку 3
+                    current_funnel == 2):  # текущая воронка - 2
                     message['message_key'] = message_key
                     message['minutes_passed'] = minutes_passed
                     result.append(message)
@@ -471,6 +607,7 @@ work_chat_manager = WorkChatManager()
 pending_messages_manager = PendingMessagesManager(funnels_config)
 excluded_users_manager = ExcludedUsersManager()
 funnels_state_manager = FunnelsStateManager()
+notification_manager = NotificationManager()
 
 # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 
@@ -552,28 +689,12 @@ def minutes_to_hours(minutes: int) -> str:
     else:
         return f"{hours} ЧАСОВ"
 
-# ========== ИСПРАВЛЕННАЯ СИСТЕМА ВОРОНОК ==========
-
-async def send_funnel_notification(context: ContextTypes.DEFAULT_TYPE, funnel_number: int, messages: List[Dict[str, Any]]):
-    """Отправляет уведомление воронки в рабочий чат"""
-    work_chat_id = work_chat_manager.get_work_chat_id()
-    if not work_chat_id:
-        logger.error("❌ Не могу отправить уведомление воронки: рабочий чат не установлен")
-        return False
-    
+def create_funnel_notification_text(funnel_number: int, chats_messages: Dict[int, List[Dict[str, Any]]]) -> str:
+    """Создает текст уведомления для воронки"""
     FUNNELS = funnels_config.get_funnels()
     funnel_emoji = get_funnel_emoji(funnel_number)
     funnel_hours_text = minutes_to_hours(FUNNELS[funnel_number])
     
-    # Группируем сообщения по чатам
-    chats_messages = {}
-    for message in messages:
-        chat_id = message['chat_id']
-        if chat_id not in chats_messages:
-            chats_messages[chat_id] = []
-        chats_messages[chat_id].append(message)
-    
-    # Создаем текст уведомления в новом формате
     if funnel_number == 1:
         notification_text = f"{funnel_emoji} {funnel_hours_text} без ответа\n"
     elif funnel_number == 2:
@@ -587,17 +708,67 @@ async def send_funnel_notification(context: ContextTypes.DEFAULT_TYPE, funnel_nu
         chat_display = get_chat_display_name(first_message)
         notification_text += f"Чат - {chat_display}\n"
     
+    return notification_text
+
+# ========== ИСПРАВЛЕННАЯ СИСТЕМА ВОРОНОК ==========
+
+async def send_funnel_notification(context: ContextTypes.DEFAULT_TYPE, funnel_number: int, messages: List[Dict[str, Any]]):
+    """Отправляет или обновляет уведомление воронки в рабочий чат"""
+    work_chat_id = work_chat_manager.get_work_chat_id()
+    if not work_chat_id:
+        logger.error("❌ Не могу отправить уведомление воронки: рабочий чат не установлен")
+        return False
+    
+    # Группируем сообщения по чатам
+    chats_messages = {}
+    for message in messages:
+        chat_id = message['chat_id']
+        if chat_id not in chats_messages:
+            chats_messages[chat_id] = []
+        chats_messages[chat_id].append(message)
+    
+    # Проверяем, есть ли уже уведомление для этой воронки
+    existing_notification = notification_manager.get_notification_by_funnel(funnel_number)
+    
     try:
-        await context.bot.send_message(chat_id=work_chat_id, text=notification_text)
+        if existing_notification:
+            # Обновляем существующее уведомление
+            updated_text = create_funnel_notification_text(funnel_number, chats_messages)
+            
+            await context.bot.edit_message_text(
+                chat_id=work_chat_id,
+                message_id=existing_notification['work_chat_message_id'],
+                text=updated_text
+            )
+            
+            # Обновляем данные уведомления
+            notification_manager.add_notification(funnel_number, existing_notification['work_chat_message_id'], chats_messages)
+            
+            logger.info(f"✅ Обновлено уведомление воронки {funnel_number}. Чатов: {len(chats_messages)}")
+            
+        else:
+            # Создаем новое уведомление
+            notification_text = create_funnel_notification_text(funnel_number, chats_messages)
+            
+            sent_message = await context.bot.send_message(
+                chat_id=work_chat_id, 
+                text=notification_text
+            )
+            
+            # Сохраняем уведомление
+            notification_manager.add_notification(funnel_number, sent_message.message_id, chats_messages)
+            
+            logger.info(f"✅ Создано уведомление воронки {funnel_number}. Чатов: {len(chats_messages)}")
         
+        # Помечаем сообщения как обработанные ЭТОЙ воронкой
         for message_data in messages:
             pending_messages_manager.mark_funnel_sent(message_data['message_key'], funnel_number)
             funnels_state_manager.add_processed_message(funnel_number, message_data['message_key'])
         
-        logger.info(f"✅ Уведомление воронки {funnel_number} отправлено в рабочий чат. Чатов: {len(chats_messages)}")
         return True
+        
     except Exception as e:
-        logger.error(f"❌ Ошибка отправки уведомления воронки {funnel_number}: {e}")
+        logger.error(f"❌ Ошибка отправки/обновления уведомления воронки {funnel_number}: {e}")
         return False
 
 async def check_funnel_messages(context: ContextTypes.DEFAULT_TYPE, funnel_number: int):
@@ -651,6 +822,35 @@ async def check_all_funnels(context: ContextTypes.DEFAULT_TYPE):
         await check_funnel_messages(context, funnel_number)
         await asyncio.sleep(1)
 
+# ========== ОБНОВЛЕННЫЙ ОБРАБОТЧИК ОТВЕТОВ МЕНЕДЖЕРА ==========
+
+async def handle_manager_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает ответы менеджеров и удаляет соответствующие уведомления"""
+    if not update or not update.message:
+        return
+        
+    username = update.message.from_user.username
+    if not is_manager(update.message.from_user.id, username):
+        return
+        
+    if update.message.text and update.message.text.startswith('/'):
+        return
+    
+    chat_id = update.message.chat.id
+    logger.info(f"🔍 Менеджер ответил в чате {chat_id}")
+    
+    # Удаляем сообщения из pending для этого чата
+    removed_count = pending_messages_manager.remove_all_chat_messages(chat_id)
+    
+    if removed_count > 0:
+        logger.info(f"✅ Удалено {removed_count} сообщений из чата {chat_id} после ответа менеджера")
+        
+        # Удаляем этот чат из всех активных уведомлений воронок
+        for funnel_number in [1, 2, 3]:
+            success = await notification_manager.remove_chat_from_notification(funnel_number, chat_id, context)
+            if success:
+                logger.info(f"✅ Чат {chat_id} удален из уведомления воронки {funnel_number}")
+
 # ========== КОМАНДЫ ДЛЯ УПРАВЛЕНИЯ ВОРОНКАМИ ==========
 
 async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -679,6 +879,10 @@ async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
    - Команда: `/set_funnel_3 <минуты>`
 
 🔄 Сбросить настройки: `/reset_funnels`
+
+📝 **Логика работы:**
+Сообщения автоматически переходят между воронками:
+Воронка 1 → Воронка 2 → Воронка 3
     """
     
     await update.message.reply_text(funnels_text, parse_mode='Markdown')
@@ -1011,6 +1215,12 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     excluded_users = excluded_users_manager.get_all_excluded()
     total_excluded = len(excluded_users["user_ids"]) + len(excluded_users["usernames"])
     
+    # Получаем статистику по воронкам
+    funnel_stats = {}
+    for funnel_num in [1, 2, 3]:
+        messages = pending_messages_manager.get_messages_for_funnel(funnel_num, funnels_state_manager)
+        funnel_stats[funnel_num] = len(messages)
+    
     status_text = f"""
 📊 **СТАТУС СИСТЕМЫ**
 
@@ -1022,9 +1232,9 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💬 **Рабочий чат:** {'✅ Установлен' if work_chat_manager.is_work_chat_set() else '❌ Не установлен'}
 
 ⚙️ **НАСТРОЙКИ ВОРОНОК:**
-🟡 Воронка 1: {FUNNELS[1]} мин ({minutes_to_hours(FUNNELS[1])})
-🟠 Воронка 2: {FUNNELS[2]} мин ({minutes_to_hours(FUNNELS[2])})
-🔴 Воронка 3: {FUNNELS[3]} мин ({minutes_to_hours(FUNNELS[3])})
+🟡 Воронка 1: {FUNNELS[1]} мин ({minutes_to_hours(FUNNELS[1])}) - {funnel_stats[1]} сообщ.
+🟠 Воронка 2: {FUNNELS[2]} мин ({minutes_to_hours(FUNNELS[2])}) - {funnel_stats[2]} сообщ.
+🔴 Воронка 3: {FUNNELS[3]} мин ({minutes_to_hours(FUNNELS[3])}) - {funnel_stats[3]} сообщ.
 
 👥 **Менеджеров в системе:** {total_excluded} ({len(excluded_users["user_ids"])} ID + {len(excluded_users["usernames"])} username)
     """
@@ -1105,6 +1315,12 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             time_stats["более 6 часов"] += 1
     
+    # Статистика по воронкам
+    funnel_stats = {}
+    for funnel_num in [1, 2, 3]:
+        messages = pending_messages_manager.get_messages_for_funnel(funnel_num, funnels_state_manager)
+        funnel_stats[funnel_num] = len(messages)
+    
     stats_text = f"""
 📈 **СТАТИСТИКА СИСТЕМЫ**
 
@@ -1113,13 +1329,18 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
    - Флагов автоответов: {flags_manager.count_flags()}
    - Менеджеров в системе: {total_excluded} ({len(excluded_users["user_ids"])} ID + {len(excluded_users["usernames"])} username)
 
+⚙️ **Статистика воронок:**
+   - 🟡 Воронка 1: {funnel_stats[1]} сообщений
+   - 🟠 Воронка 2: {funnel_stats[2]} сообщений  
+   - 🔴 Воронка 3: {funnel_stats[3]} сообщений
+
 ⏱ **Время ожидания ответа:**
    - Менее 1 часа: {time_stats['менее 1 часа']}
    - 1-3 часа: {time_stats['1-3 часа']}
    - 3-6 часов: {time_stats['3-6 часов']}
    - Более 6 часов: {time_stats['более 6 часов']}
 
-⚙️ **Рабочий чат:** {'✅ Установлен' if work_chat_manager.is_work_chat_set() else '❌ Не установлен'}
+💬 **Рабочий чат:** {'✅ Установлен' if work_chat_manager.is_work_chat_set() else '❌ Не установлен'}
 🕐 **Текущее время:** {now.strftime('%H:%M:%S')}
     """
     
@@ -1182,9 +1403,14 @@ async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         oldest = min(msg['timestamp'] for msg in messages)
         time_ago = format_time_ago(oldest)
         
-        pending_text += f"{i}. {chat_display}\n"
+        # Определяем текущую воронку для чата
+        current_funnel = max([msg.get('current_funnel', 0) for msg in messages])
+        funnel_emoji = get_funnel_emoji(current_funnel) if current_funnel > 0 else "⚪"
+        
+        pending_text += f"{i}. {chat_display} {funnel_emoji}\n"
         pending_text += f"   📝 Сообщений: {len(messages)}\n"
-        pending_text += f"   ⏰ Самое старое: {time_ago} назад\n\n"
+        pending_text += f"   ⏰ Самое старое: {time_ago} назад\n"
+        pending_text += f"   🚀 Текущая воронка: {current_funnel}\n\n"
     
     if len(pending_text) > 4000:
         pending_text = pending_text[:4000] + "\n\n... (сообщение обрезано)"
@@ -1237,20 +1463,6 @@ async def test_funnel_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("✅ Тест воронок завершен")
 
 # ========== ОБРАБОТЧИКИ СООБЩЕНИЙ ==========
-
-async def handle_manager_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    username = update.message.from_user.username
-    if not is_manager(update.message.from_user.id, username):
-        return
-        
-    if update.message.text and update.message.text.startswith('/'):
-        return
-    
-    chat_id = update.message.chat.id
-    logger.info(f"🔍 Менеджер ответил в чате {chat_id}")
 
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update or not update.message:

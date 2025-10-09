@@ -206,10 +206,11 @@ class FunnelsConfig:
         except Exception as e:
             logger.error(f"Ошибка загрузки конфигурации воронок: {e}")
         
+        # Изменены интервалы на часы
         return {
-            1: 1,    # 1 минута для теста
-            2: 2,    # 2 минуты для теста  
-            3: 3     # 3 минуты для теста
+            1: 60,    # 1 час
+            2: 180,   # 3 часа  
+            3: 300    # 5 часов
         }
     
     def save_funnels(self):
@@ -239,7 +240,7 @@ class FunnelsConfig:
     
     def reset_to_default(self):
         """Сбрасывает настройки воронок к значениям по умолчанию"""
-        self.funnels = {1: 1, 2: 2, 3: 3}
+        self.funnels = {1: 60, 2: 180, 3: 300}
         self.save_funnels()
         logger.info("Настройки воронок сброшены к значениям по умолчанию")
 
@@ -518,17 +519,10 @@ def should_respond_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 def get_chat_display_name(chat_data: Dict[str, Any]) -> str:
     chat_title = chat_data.get('chat_title')
-    username = chat_data.get('username')
-    first_name = chat_data.get('first_name')
-    
     if chat_title:
-        return f"💬 {chat_title}"
-    elif username:
-        return f"👤 @{username}"
-    elif first_name:
-        return f"👤 {first_name}"
+        return chat_title
     else:
-        return f"💬 Чат {chat_data['chat_id']}"
+        return f"Чат {chat_data['chat_id']}"
 
 def get_funnel_emoji(funnel_number: int) -> str:
     emojis = {1: "🟡", 2: "🟠", 3: "🔴"}
@@ -547,13 +541,298 @@ def format_time_ago(timestamp: str) -> str:
     else:
         return f"{minutes}м"
 
-def minutes_to_hours_minutes(minutes: int) -> str:
+def minutes_to_hours(minutes: int) -> str:
     hours = minutes // 60
-    mins = minutes % 60
-    if hours > 0:
-        return f"{hours} ч {mins} м"
+    if hours == 1:
+        return "1 ЧАС"
+    elif hours == 3:
+        return "3 ЧАСА"
+    elif hours == 5:
+        return "5 ЧАСОВ"
     else:
-        return f"{mins} м"
+        return f"{hours} ЧАСОВ"
+
+# ========== ИСПРАВЛЕННАЯ СИСТЕМА ВОРОНОК ==========
+
+async def send_funnel_notification(context: ContextTypes.DEFAULT_TYPE, funnel_number: int, messages: List[Dict[str, Any]]):
+    """Отправляет уведомление воронки в рабочий чат"""
+    work_chat_id = work_chat_manager.get_work_chat_id()
+    if not work_chat_id:
+        logger.error("❌ Не могу отправить уведомление воронки: рабочий чат не установлен")
+        return False
+    
+    FUNNELS = funnels_config.get_funnels()
+    funnel_emoji = get_funnel_emoji(funnel_number)
+    funnel_hours_text = minutes_to_hours(FUNNELS[funnel_number])
+    
+    # Группируем сообщения по чатам
+    chats_messages = {}
+    for message in messages:
+        chat_id = message['chat_id']
+        if chat_id not in chats_messages:
+            chats_messages[chat_id] = []
+        chats_messages[chat_id].append(message)
+    
+    # Создаем текст уведомления в новом формате
+    if funnel_number == 1:
+        notification_text = f"{funnel_emoji} {funnel_hours_text} без ответа\n"
+    elif funnel_number == 2:
+        notification_text = f"{funnel_emoji} {funnel_hours_text} без ответа\n"
+    else:
+        notification_text = f"{funnel_emoji} БОЛЕЕ {funnel_hours_text} без ответа\n"
+    
+    # Добавляем список чатов
+    for chat_id, chat_messages in chats_messages.items():
+        first_message = chat_messages[0]
+        chat_display = get_chat_display_name(first_message)
+        notification_text += f"Чат - {chat_display}\n"
+    
+    try:
+        await context.bot.send_message(chat_id=work_chat_id, text=notification_text)
+        
+        for message_data in messages:
+            pending_messages_manager.mark_funnel_sent(message_data['message_key'], funnel_number)
+            funnels_state_manager.add_processed_message(funnel_number, message_data['message_key'])
+        
+        logger.info(f"✅ Уведомление воронки {funnel_number} отправлено в рабочий чат. Чатов: {len(chats_messages)}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Ошибка отправки уведомления воронки {funnel_number}: {e}")
+        return False
+
+async def check_funnel_messages(context: ContextTypes.DEFAULT_TYPE, funnel_number: int):
+    """Проверяет и отправляет уведомления для конкретной воронки"""
+    
+    if not work_chat_manager.is_work_chat_set():
+        logger.warning("❌ Рабочий чат не установлен!")
+        return
+    
+    FUNNELS = funnels_config.get_funnels()
+    funnel_minutes = FUNNELS[funnel_number]
+    
+    last_check = funnels_state_manager.get_last_check(funnel_number)
+    now = datetime.now(MOSCOW_TZ)
+    time_since_last_check = now - last_check
+    
+    # Проверяем каждые 30 секунд
+    check_interval = timedelta(seconds=30)
+    
+    if time_since_last_check < check_interval:
+        return
+    
+    logger.info(f"🔍 Проверка воронки {funnel_number} (интервал: {funnel_minutes} мин)")
+    
+    messages_for_funnel = pending_messages_manager.get_messages_for_funnel(funnel_number, funnels_state_manager)
+    
+    if messages_for_funnel:
+        chats_in_funnel = {}
+        for msg in messages_for_funnel:
+            chat_id = msg['chat_id']
+            if chat_id not in chats_in_funnel:
+                chats_in_funnel[chat_id] = []
+            chats_in_funnel[chat_id].append(msg)
+        
+        logger.info(f"🚨 Воронка {funnel_number}: {len(chats_in_funnel)} чатов, {len(messages_for_funnel)} сообщений")
+        
+        success = await send_funnel_notification(context, funnel_number, messages_for_funnel)
+        
+        if success:
+            funnels_state_manager.update_last_check(funnel_number)
+        else:
+            logger.error(f"❌ Не удалось отправить уведомление воронки {funnel_number}")
+    else:
+        logger.info(f"✅ Воронка {funnel_number}: нет сообщений для уведомления")
+
+async def check_all_funnels(context: ContextTypes.DEFAULT_TYPE):
+    """Проверяет все воронки по очереди"""
+    logger.info("🔄 Запуск проверки всех воронок...")
+    
+    for funnel_number in [1, 2, 3]:
+        await check_funnel_messages(context, funnel_number)
+        await asyncio.sleep(1)
+
+# ========== КОМАНДЫ ДЛЯ УПРАВЛЕНИЯ ВОРОНКАМИ ==========
+
+async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    FUNNELS = funnels_config.get_funnels()
+    
+    funnels_text = f"""
+⚙️ **ТЕКУЩИЕ НАСТРОЙКИ ВОРОНОК**
+
+🟡 **Воронка 1 (начальное уведомление):**
+   - Интервал: {FUNNELS[1]} минут ({minutes_to_hours(FUNNELS[1])})
+   - Команда: `/set_funnel_1 <минуты>`
+
+🟠 **Воронка 2 (повторное уведомление):**
+   - Интервал: {FUNNELS[2]} минут ({minutes_to_hours(FUNNELS[2])})
+   - Команда: `/set_funnel_2 <минуты>`
+
+🔴 **Воронка 3 (срочное уведомление):**
+   - Интервал: {FUNNELS[3]} минут ({minutes_to_hours(FUNNELS[3])})
+   - Команда: `/set_funnel_3 <минуты>`
+
+🔄 Сбросить настройки: `/reset_funnels`
+    """
+    
+    await update.message.reply_text(funnels_text, parse_mode='Markdown')
+
+async def set_funnel_1_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Использование: /set_funnel_1 <минуты>")
+        return
+    
+    minutes = int(context.args[0])
+    if minutes <= 0:
+        await update.message.reply_text("❌ Количество минут должно быть положительным числом")
+        return
+    
+    if funnels_config.set_funnel_interval(1, minutes):
+        await update.message.reply_text(f"✅ Воронка 1 установлена на {minutes} минут ({minutes_to_hours(minutes)})")
+    else:
+        await update.message.reply_text("❌ Ошибка установки интервала воронки")
+
+async def set_funnel_2_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Использование: /set_funnel_2 <минуты>")
+        return
+    
+    minutes = int(context.args[0])
+    if minutes <= 0:
+        await update.message.reply_text("❌ Количество минут должно быть положительным числом")
+        return
+    
+    if funnels_config.set_funnel_interval(2, minutes):
+        await update.message.reply_text(f"✅ Воронка 2 установлена на {minutes} минут ({minutes_to_hours(minutes)})")
+    else:
+        await update.message.reply_text("❌ Ошибка установки интервала воронки")
+
+async def set_funnel_3_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Использование: /set_funnel_3 <минуты>")
+        return
+    
+    minutes = int(context.args[0])
+    if minutes <= 0:
+        await update.message.reply_text("❌ Количество минут должно быть положительным числом")
+        return
+    
+    if funnels_config.set_funnel_interval(3, minutes):
+        await update.message.reply_text(f"✅ Воронка 3 установлена на {minutes} минут ({minutes_to_hours(minutes)})")
+    else:
+        await update.message.reply_text("❌ Ошибка установки интервала воронки")
+
+async def reset_funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    funnels_config.reset_to_default()
+    await update.message.reply_text("✅ Настройки воронок сброшены к значениям по умолчанию")
+
+# ========== КОМАНДЫ ДЛЯ РУЧНОЙ ПРОВЕРКИ ВОРОНОК ==========
+
+async def check_voronka_1_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    await update.message.reply_text("🔍 Запускаю ручную проверку воронки 1...")
+    await check_funnel_messages(context, 1)
+    await update.message.reply_text("✅ Проверка воронки 1 завершена")
+
+async def check_voronka_2_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    await update.message.reply_text("🔍 Запускаю ручную проверку воронки 2...")
+    await check_funnel_messages(context, 2)
+    await update.message.reply_text("✅ Проверка воронки 2 завершена")
+
+async def check_voronka_3_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    await update.message.reply_text("🔍 Запускаю ручную проверку воронки 3...")
+    await check_funnel_messages(context, 3)
+    await update.message.reply_text("✅ Проверка воронки 3 завершена")
+
+async def check_all_voronki_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    await update.message.reply_text("🔍 Запускаю ручную проверку всех воронок...")
+    await check_all_funnels(context)
+    await update.message.reply_text("✅ Проверка всех воронок завершена")
+
+async def force_funnel_check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    FUNNELS = funnels_config.get_funnels()
+    
+    response_text = "🔍 **ПРИНУДИТЕЛЬНАЯ ПРОВЕРКА ВОРОНОК**\n\n"
+    
+    for funnel_num in [1, 2, 3]:
+        messages = pending_messages_manager.get_messages_for_funnel(funnel_num, funnels_state_manager)
+        chats_count = len(set(msg['chat_id'] for msg in messages))
+        
+        response_text += f"{get_funnel_emoji(funnel_num)} **Воронка {funnel_num}** ({minutes_to_hours(FUNNELS[funnel_num])}):\n"
+        response_text += f"   📝 Сообщений: {len(messages)}\n"
+        response_text += f"   💬 Чатов: {chats_count}\n\n"
+    
+    await update.message.reply_text(response_text, parse_mode='Markdown')
+    
+    await check_all_funnels(context)
 
 # ========== КОМАНДЫ ДЛЯ УПРАВЛЕНИЯ ИСКЛЮЧЕНИЯМИ ==========
 
@@ -651,115 +930,6 @@ async def clear_exceptions_command(update: Update, context: ContextTypes.DEFAULT
     excluded_users_manager.clear_all()
     await update.message.reply_text("✅ Все исключения очищены")
 
-# ========== КОМАНДЫ ДЛЯ УПРАВЛЕНИЯ ВОРОНКАМИ ==========
-
-async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    if not is_admin(update.message.from_user.id):
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
-    
-    FUNNELS = funnels_config.get_funnels()
-    
-    funnels_text = f"""
-⚙️ **ТЕКУЩИЕ НАСТРОЙКИ ВОРОНОК**
-
-🟡 **Воронка 1 (начальное уведомление):**
-   - Интервал: {FUNNELS[1]} минут ({minutes_to_hours_minutes(FUNNELS[1])})
-   - Команда: `/set_funnel_1 <минуты>`
-
-🟠 **Воронка 2 (повторное уведомление):**
-   - Интервал: {FUNNELS[2]} минут ({minutes_to_hours_minutes(FUNNELS[2])})
-   - Команда: `/set_funnel_2 <минуты>`
-
-🔴 **Воронка 3 (срочное уведомление):**
-   - Интервал: {FUNNELS[3]} минут ({minutes_to_hours_minutes(FUNNELS[3])})
-   - Команда: `/set_funnel_3 <минуты>`
-
-🔄 Сбросить настройки: `/reset_funnels`
-    """
-    
-    await update.message.reply_text(funnels_text, parse_mode='Markdown')
-
-async def set_funnel_1_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    if not is_admin(update.message.from_user.id):
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
-    
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("❌ Использование: /set_funnel_1 <минуты>")
-        return
-    
-    minutes = int(context.args[0])
-    if minutes <= 0:
-        await update.message.reply_text("❌ Количество минут должно быть положительным числом")
-        return
-    
-    if funnels_config.set_funnel_interval(1, minutes):
-        await update.message.reply_text(f"✅ Воронка 1 установлена на {minutes} минут ({minutes_to_hours_minutes(minutes)})")
-    else:
-        await update.message.reply_text("❌ Ошибка установки интервала воронки")
-
-async def set_funnel_2_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    if not is_admin(update.message.from_user.id):
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
-    
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("❌ Использование: /set_funnel_2 <минуты>")
-        return
-    
-    minutes = int(context.args[0])
-    if minutes <= 0:
-        await update.message.reply_text("❌ Количество минут должно быть положительным числом")
-        return
-    
-    if funnels_config.set_funnel_interval(2, minutes):
-        await update.message.reply_text(f"✅ Воронка 2 установлена на {minutes} минут ({minutes_to_hours_minutes(minutes)})")
-    else:
-        await update.message.reply_text("❌ Ошибка установки интервала воронки")
-
-async def set_funnel_3_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    if not is_admin(update.message.from_user.id):
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
-    
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("❌ Использование: /set_funnel_3 <минуты>")
-        return
-    
-    minutes = int(context.args[0])
-    if minutes <= 0:
-        await update.message.reply_text("❌ Количество минут должно быть положительным числом")
-        return
-    
-    if funnels_config.set_funnel_interval(3, minutes):
-        await update.message.reply_text(f"✅ Воронка 3 установлена на {minutes} минут ({minutes_to_hours_minutes(minutes)})")
-    else:
-        await update.message.reply_text("❌ Ошибка установки интервала воронки")
-
-async def reset_funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    if not is_admin(update.message.from_user.id):
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
-    
-    funnels_config.reset_to_default()
-    await update.message.reply_text("✅ Настройки воронок сброшены к значениям по умолчанию")
-
 # ========== ОСНОВНЫЕ КОМАНДЫ ==========
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -852,9 +1022,9 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💬 **Рабочий чат:** {'✅ Установлен' if work_chat_manager.is_work_chat_set() else '❌ Не установлен'}
 
 ⚙️ **НАСТРОЙКИ ВОРОНОК:**
-🟡 Воронка 1: {FUNNELS[1]} мин ({minutes_to_hours_minutes(FUNNELS[1])})
-🟠 Воронка 2: {FUNNELS[2]} мин ({minutes_to_hours_minutes(FUNNELS[2])})
-🔴 Воронка 3: {FUNNELS[3]} мин ({minutes_to_hours_minutes(FUNNELS[3])})
+🟡 Воронка 1: {FUNNELS[1]} мин ({minutes_to_hours(FUNNELS[1])})
+🟠 Воронка 2: {FUNNELS[2]} мин ({minutes_to_hours(FUNNELS[2])})
+🔴 Воронка 3: {FUNNELS[3]} мин ({minutes_to_hours(FUNNELS[3])})
 
 👥 **Менеджеров в системе:** {total_excluded} ({len(excluded_users["user_ids"])} ID + {len(excluded_users["usernames"])} username)
     """
@@ -954,210 +1124,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     
     await update.message.reply_text(stats_text, parse_mode='Markdown')
-
-# ========== ИСПРАВЛЕННАЯ СИСТЕМА ВОРОНОК ==========
-
-async def send_funnel_notification(context: ContextTypes.DEFAULT_TYPE, funnel_number: int, messages: List[Dict[str, Any]]):
-    """Отправляет уведомление воронки в рабочий чат"""
-    work_chat_id = work_chat_manager.get_work_chat_id()
-    if not work_chat_id:
-        logger.error("❌ Не могу отправить уведомление воронки: рабочий чат не установлен")
-        return False
-    
-    FUNNELS = funnels_config.get_funnels()
-    funnel_emoji = get_funnel_emoji(funnel_number)
-    funnel_minutes = FUNNELS[funnel_number]
-    
-    time_text = minutes_to_hours_minutes(funnel_minutes).upper()
-    
-    if funnel_number == 1:
-        header = f"{funnel_emoji} <b>ВОРОНКА 1: СООБЩЕНИЯ ЖДУТ ОТВЕТА {time_text}</b>"
-        description = f"📊 Новых сообщений: <b>{len(messages)}</b>"
-    elif funnel_number == 2:
-        header = f"{funnel_emoji} <b>ВОРОНКА 2: СООБЩЕНИЯ ЖДУТ ОТВЕТА {time_text}</b>"
-        description = f"📊 Сообщений требует внимания: <b>{len(messages)}</b>"
-    else:
-        header = f"{funnel_emoji} <b>ВОРОНКА 3: СРОЧНЫЕ СООБЩЕНИЯ ЖДУТ ОТВЕТА {time_text}</b>"
-        description = f"📊 Срочных сообщений: <b>{len(messages)}</b>"
-    
-    chats_messages = {}
-    for message in messages:
-        chat_id = message['chat_id']
-        if chat_id not in chats_messages:
-            chats_messages[chat_id] = []
-        chats_messages[chat_id].append(message)
-    
-    notification_text = f"{header}\n\n{description}\n\n📋 <b>Список чатов с непрочитанными сообщениями:</b>\n"
-    
-    chat_number = 1
-    for chat_id, chat_messages in chats_messages.items():
-        first_message = chat_messages[0]
-        chat_display = get_chat_display_name(first_message)
-        
-        notification_text += f"\n{chat_number}. {chat_display}"
-        notification_text += f"\n   📝 Сообщений: {len(chat_messages)}"
-        
-        oldest_timestamp = min(msg['timestamp'] for msg in chat_messages)
-        time_ago = format_time_ago(oldest_timestamp)
-        notification_text += f"\n   ⏰ Самое старое: {time_ago} назад"
-        
-        for i, msg in enumerate(chat_messages[:3]):
-            user_info = f"@{msg['username']}" if msg.get('username') else f"ID:{msg['user_id']}"
-            message_preview = msg['message_text'][:50] + "..." if len(msg['message_text']) > 50 else msg['message_text']
-            notification_text += f"\n      {i+1}. {user_info}: {message_preview}"
-        
-        if len(chat_messages) > 3:
-            notification_text += f"\n      ... и еще {len(chat_messages) - 3} сообщ."
-        
-        notification_text += f"\n"
-        chat_number += 1
-    
-    notification_text += f"\n💡 <i>Сообщения остаются в системе до ручного удаления</i>"
-    
-    try:
-        await context.bot.send_message(chat_id=work_chat_id, text=notification_text, parse_mode='HTML')
-        
-        for message_data in messages:
-            pending_messages_manager.mark_funnel_sent(message_data['message_key'], funnel_number)
-            funnels_state_manager.add_processed_message(funnel_number, message_data['message_key'])
-        
-        logger.info(f"✅ Уведомление воронки {funnel_number} отправлено в рабочий чат. Чатов: {len(chats_messages)}, Сообщений: {len(messages)}")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Ошибка отправки уведомления воронки {funnel_number}: {e}")
-        return False
-
-async def check_funnel_messages(context: ContextTypes.DEFAULT_TYPE, funnel_number: int):
-    """Проверяет и отправляет уведомления для конкретной воронки"""
-    
-    if not work_chat_manager.is_work_chat_set():
-        logger.warning("❌ Рабочий чат не установлен!")
-        return
-    
-    # УБРАЛ ПРОВЕРКУ РАБОЧЕГО ВРЕМЕНИ - уведомления должны приходить всегда!
-    
-    FUNNELS = funnels_config.get_funnels()
-    funnel_minutes = FUNNELS[funnel_number]
-    
-    last_check = funnels_state_manager.get_last_check(funnel_number)
-    now = datetime.now(MOSCOW_TZ)
-    time_since_last_check = now - last_check
-    
-    # УМЕНЬШИЛ ИНТЕРВАЛ ПРОВЕРКИ ДО 30 СЕКУНД
-    check_interval = timedelta(seconds=30)
-    
-    if time_since_last_check < check_interval:
-        logger.info(f"⏰ Воронка {funnel_number}: проверка пропущена")
-        return
-    
-    logger.info(f"🔍 Проверка воронки {funnel_number} (интервал: {funnel_minutes} мин)")
-    
-    messages_for_funnel = pending_messages_manager.get_messages_for_funnel(funnel_number, funnels_state_manager)
-    
-    if messages_for_funnel:
-        chats_in_funnel = {}
-        for msg in messages_for_funnel:
-            chat_id = msg['chat_id']
-            if chat_id not in chats_in_funnel:
-                chats_in_funnel[chat_id] = []
-            chats_in_funnel[chat_id].append(msg)
-        
-        logger.info(f"🚨 Воронка {funnel_number}: {len(chats_in_funnel)} чатов, {len(messages_for_funnel)} сообщений")
-        
-        for chat_id, chat_messages in chats_in_funnel.items():
-            chat_display = get_chat_display_name(chat_messages[0])
-            logger.info(f"  📝 {chat_display}: {len(chat_messages)} сообщ.")
-        
-        success = await send_funnel_notification(context, funnel_number, messages_for_funnel)
-        
-        if success:
-            funnels_state_manager.update_last_check(funnel_number)
-        else:
-            logger.error(f"❌ Не удалось отправить уведомление воронки {funnel_number}")
-    else:
-        logger.info(f"✅ Воронка {funnel_number}: нет сообщений для уведомления")
-
-async def check_all_funnels(context: ContextTypes.DEFAULT_TYPE):
-    """Проверяет все воронки по очереди"""
-    logger.info("🔄 Запуск проверки всех воронок...")
-    
-    for funnel_number in [1, 2, 3]:
-        await check_funnel_messages(context, funnel_number)
-        await asyncio.sleep(1)
-
-# ========== КОМАНДЫ ДЛЯ РУЧНОЙ ПРОВЕРКИ ВОРОНОК ==========
-
-async def check_voronka_1_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    if not is_admin(update.message.from_user.id):
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
-    
-    await update.message.reply_text("🔍 Запускаю ручную проверку воронки 1...")
-    await check_funnel_messages(context, 1)
-    await update.message.reply_text("✅ Проверка воронки 1 завершена")
-
-async def check_voronka_2_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    if not is_admin(update.message.from_user.id):
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
-    
-    await update.message.reply_text("🔍 Запускаю ручную проверку воронки 2...")
-    await check_funnel_messages(context, 2)
-    await update.message.reply_text("✅ Проверка воронки 2 завершена")
-
-async def check_voronka_3_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    if not is_admin(update.message.from_user.id):
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
-    
-    await update.message.reply_text("🔍 Запускаю ручную проверку воронки 3...")
-    await check_funnel_messages(context, 3)
-    await update.message.reply_text("✅ Проверка воронки 3 завершена")
-
-async def check_all_voronki_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    if not is_admin(update.message.from_user.id):
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
-    
-    await update.message.reply_text("🔍 Запускаю ручную проверку всех воронок...")
-    await check_all_funnels(context)
-    await update.message.reply_text("✅ Проверка всех воронок завершена")
-
-async def force_funnel_check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    if not is_admin(update.message.from_user.id):
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
-    
-    FUNNELS = funnels_config.get_funnels()
-    
-    response_text = "🔍 **ПРИНУДИТЕЛЬНАЯ ПРОВЕРКА ВОРОНОК**\n\n"
-    
-    for funnel_num in [1, 2, 3]:
-        messages = pending_messages_manager.get_messages_for_funnel(funnel_num, funnels_state_manager)
-        chats_count = len(set(msg['chat_id'] for msg in messages))
-        
-        response_text += f"{get_funnel_emoji(funnel_num)} **Воронка {funnel_num}** ({minutes_to_hours_minutes(FUNNELS[funnel_num])}):\n"
-        response_text += f"   📝 Сообщений: {len(messages)}\n"
-        response_text += f"   💬 Чатов: {chats_count}\n\n"
-    
-    await update.message.reply_text(response_text, parse_mode='Markdown')
-    
-    await check_all_funnels(context)
 
 # ========== КОМАНДЫ ДЛЯ РУЧНОГО УПРАВЛЕНИЯ СООБЩЕНИЯМИ ==========
 
@@ -1452,7 +1418,7 @@ def main():
         # Обработчик ошибок
         application.add_error_handler(error_handler)
         
-        # Периодическая проверка воронок (каждые 30 секунд для теста)
+        # Периодическая проверка воронок (каждые 30 секунд)
         job_queue = application.job_queue
         if job_queue:
             job_queue.run_repeating(check_all_funnels, interval=30, first=5)

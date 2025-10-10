@@ -54,7 +54,7 @@ class MasterNotificationManager:
                     return json.load(f)
         except Exception as e:
             logger.error(f"Ошибка загрузки главного уведомления: {e}")
-        return {"message_id": None, "last_update": None}
+        return {"message_ids": [], "last_update": None}
     
     def save_data(self):
         """Сохраняет данные главного уведомления в файл"""
@@ -64,16 +64,26 @@ class MasterNotificationManager:
         except Exception as e:
             logger.error(f"Ошибка сохранения главного уведомления: {e}")
     
-    def set_message_id(self, message_id: int):
-        """Устанавливает ID сообщения главного уведомления"""
-        self.data["message_id"] = message_id
+    def add_message_id(self, message_id: int):
+        """Добавляет ID сообщения в список"""
+        if "message_ids" not in self.data:
+            self.data["message_ids"] = []
+        
+        self.data["message_ids"].append(message_id)
         self.data["last_update"] = datetime.now(MOSCOW_TZ).isoformat()
         self.save_data()
-        logger.info(f"✅ Установлен ID главного уведомления: {message_id}")
+        logger.info(f"✅ Добавлен ID уведомления: {message_id}")
     
-    def get_message_id(self) -> int:
-        """Возвращает ID сообщения главного уведомления"""
-        return self.data.get("message_id")
+    def get_message_ids(self) -> List[int]:
+        """Возвращает список ID сообщений уведомлений"""
+        return self.data.get("message_ids", [])
+    
+    def clear_old_messages(self, keep_last: int = 3):
+        """Очищает старые сообщения, оставляя только последние"""
+        if "message_ids" in self.data and len(self.data["message_ids"]) > keep_last:
+            # Оставляем только последние keep_last сообщений
+            self.data["message_ids"] = self.data["message_ids"][-keep_last:]
+            self.save_data()
     
     def should_update(self) -> bool:
         """Проверяет, нужно ли обновлять уведомление (каждые 15 минут)"""
@@ -670,61 +680,71 @@ def create_master_notification_text() -> str:
     
     return notification_text
 
-async def send_or_update_master_notification(context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет или обновляет единое уведомление со всеми воронками"""
+async def delete_old_notifications(context: ContextTypes.DEFAULT_TYPE):
+    """Удаляет старые уведомления"""
+    work_chat_id = work_chat_manager.get_work_chat_id()
+    if not work_chat_id:
+        return
+    
+    try:
+        message_ids = master_notification_manager.get_message_ids()
+        for message_id in message_ids:
+            try:
+                await context.bot.delete_message(
+                    chat_id=work_chat_id,
+                    message_id=message_id
+                )
+                logger.info(f"✅ Удалено старое уведомление: {message_id}")
+            except Exception as e:
+                logger.warning(f"❌ Не удалось удалить сообщение {message_id}: {e}")
+        
+        # Очищаем список сообщений после удаления
+        master_notification_manager.data["message_ids"] = []
+        master_notification_manager.save_data()
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка при удалении старых уведомлений: {e}")
+
+async def send_new_master_notification(context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет новое уведомление (удаляет старые и отправляет новое)"""
     work_chat_id = work_chat_manager.get_work_chat_id()
     if not work_chat_id:
         logger.error("❌ Не могу отправить уведомление: рабочий чат не установлен")
         return False
     
     try:
+        # Сначала удаляем старые уведомления
+        await delete_old_notifications(context)
+        
+        # Затем отправляем новое
         notification_text = create_master_notification_text()
-        existing_message_id = master_notification_manager.get_message_id()
         
-        if existing_message_id:
-            # Пытаемся обновить существующее сообщение
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=work_chat_id,
-                    message_id=existing_message_id,
-                    text=notification_text,
-                    parse_mode='Markdown'
-                )
-                master_notification_manager.set_message_id(existing_message_id)
-                logger.info("✅ Обновлено единое уведомление")
-            except Exception as e:
-                # Если сообщение не найдено, отправляем новое
-                logger.warning(f"❌ Не удалось обновить сообщение, отправляю новое: {e}")
-                sent_message = await context.bot.send_message(
-                    chat_id=work_chat_id,
-                    text=notification_text,
-                    parse_mode='Markdown'
-                )
-                master_notification_manager.set_message_id(sent_message.message_id)
-                logger.info("✅ Отправлено новое единое уведомление")
-        else:
-            # Отправляем новое сообщение
-            sent_message = await context.bot.send_message(
-                chat_id=work_chat_id,
-                text=notification_text,
-                parse_mode='Markdown'
-            )
-            master_notification_manager.set_message_id(sent_message.message_id)
-            logger.info("✅ Отправлено новое единое уведомление")
+        sent_message = await context.bot.send_message(
+            chat_id=work_chat_id,
+            text=notification_text,
+            parse_mode='Markdown'
+        )
         
+        # Сохраняем ID нового сообщения
+        master_notification_manager.add_message_id(sent_message.message_id)
+        
+        # Очищаем старые сообщения (оставляем только последние 3)
+        master_notification_manager.clear_old_messages(keep_last=3)
+        
+        logger.info("✅ Отправлено новое единое уведомление")
         return True
         
     except Exception as e:
-        logger.error(f"❌ Ошибка отправки/обновления единого уведомления: {e}")
+        logger.error(f"❌ Ошибка отправки нового уведомления: {e}")
         return False
 
-async def check_and_update_master_notification(context: ContextTypes.DEFAULT_TYPE):
-    """Проверяет и обновляет единое уведомление если прошло 15 минут"""
+async def check_and_send_new_notification(context: ContextTypes.DEFAULT_TYPE):
+    """Проверяет и отправляет новое уведомление каждые 15 минут"""
     if not master_notification_manager.should_update():
         return
     
-    logger.info("🔄 Проверка необходимости обновления единого уведомления...")
-    await send_or_update_master_notification(context)
+    logger.info("🔄 Отправка нового уведомления (удаление старого + новое)...")
+    await send_new_master_notification(context)
 
 # ========== ОБРАБОТЧИК ОТВЕТОВ МЕНЕДЖЕРА ==========
 
@@ -749,8 +769,8 @@ async def handle_manager_reply(update: Update, context: ContextTypes.DEFAULT_TYP
     if removed_count > 0:
         logger.info(f"✅ Удалено {removed_count} сообщений из чата {chat_id} после ответа менеджера")
         
-        # Немедленно обновляем единое уведомление
-        await send_or_update_master_notification(context)
+        # Немедленно отправляем новое уведомление
+        await send_new_master_notification(context)
 
 # ========== КОМАНДЫ БОТА ==========
 
@@ -817,6 +837,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📝 **Новая логика:**
 Единое уведомление обновляется автоматически каждые 15 минут
+**СТАРОЕ УДАЛЯЕТСЯ, ОТПРАВЛЯЕТСЯ НОВОЕ**
     """
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -847,7 +868,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📋 **Непрочитанные сообщения:** {len(pending_messages_manager.get_all_pending_messages())}
 🚩 **Флаги автоответов:** {flags_manager.count_flags()}
 💬 **Рабочий чат:** {'✅ Установлен' if work_chat_manager.is_work_chat_set() else '❌ Не установлен'}
-📢 **Единое уведомление:** {'✅ Активно' if master_notification_manager.get_message_id() else '❌ Не активно'}
+📢 **Активных уведомлений:** {len(master_notification_manager.get_message_ids())}
 
 ⚙️ **НАСТРОЙКИ ВОРОНОК:**
 🟡 Воронка 1: {FUNNELS[1]} мин ({minutes_to_hours_text(FUNNELS[1])}) - {funnel_1_count} сообщ.
@@ -855,6 +876,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🔴 Воронка 3: {FUNNELS[3]} мин ({minutes_to_hours_text(FUNNELS[3])}) - {funnel_3_count} сообщ.
 
 👥 **Менеджеров в системе:** {total_excluded} ({len(excluded_users["user_ids"])} ID + {len(excluded_users["usernames"])} username)
+
+🔄 **Логика уведомлений:** Удаление старого + отправка нового каждые 15 минут
     """
     
     await update.message.reply_text(status_text, parse_mode='Markdown')
@@ -888,6 +911,7 @@ async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📝 **Логика работы:**
 Единое уведомление обновляется каждые 15 минут
+**СТАРОЕ УДАЛЯЕТСЯ, ОТПРАВЛЯЕТСЯ НОВОЕ**
     """
     
     await update.message.reply_text(funnels_text, parse_mode='Markdown')
@@ -911,7 +935,7 @@ async def set_funnel_1_command(update: Update, context: ContextTypes.DEFAULT_TYP
     
     if funnels_config.set_funnel_interval(1, minutes):
         await update.message.reply_text(f"✅ Воронка 1 установлена на {minutes} минут ({minutes_to_hours_text(minutes)})")
-        await send_or_update_master_notification(context)
+        await send_new_master_notification(context)
     else:
         await update.message.reply_text("❌ Ошибка установки интервала воронки")
 
@@ -934,7 +958,7 @@ async def set_funnel_2_command(update: Update, context: ContextTypes.DEFAULT_TYP
     
     if funnels_config.set_funnel_interval(2, minutes):
         await update.message.reply_text(f"✅ Воронка 2 установлена на {minutes} минут ({minutes_to_hours_text(minutes)})")
-        await send_or_update_master_notification(context)
+        await send_new_master_notification(context)
     else:
         await update.message.reply_text("❌ Ошибка установки интервала воронки")
 
@@ -957,7 +981,7 @@ async def set_funnel_3_command(update: Update, context: ContextTypes.DEFAULT_TYP
     
     if funnels_config.set_funnel_interval(3, minutes):
         await update.message.reply_text(f"✅ Воронка 3 установлена на {minutes} минут ({minutes_to_hours_text(minutes)})")
-        await send_or_update_master_notification(context)
+        await send_new_master_notification(context)
     else:
         await update.message.reply_text("❌ Ошибка установки интервала воронки")
 
@@ -971,7 +995,7 @@ async def reset_funnels_command(update: Update, context: ContextTypes.DEFAULT_TY
     
     funnels_config.reset_to_default()
     await update.message.reply_text("✅ Настройки воронок сброшены к значениям по умолчанию")
-    await send_or_update_master_notification(context)
+    await send_new_master_notification(context)
 
 async def update_notification_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда для ручного обновления уведомления"""
@@ -983,7 +1007,7 @@ async def update_notification_command(update: Update, context: ContextTypes.DEFA
         return
     
     await update.message.reply_text("🔄 Обновляю единое уведомление...")
-    success = await send_or_update_master_notification(context)
+    success = await send_new_master_notification(context)
     
     if success:
         await update.message.reply_text("✅ Единое уведомление обновлено")
@@ -1002,7 +1026,7 @@ async def set_work_chat_command(update: Update, context: ContextTypes.DEFAULT_TY
     if work_chat_manager.save_work_chat(chat_id):
         await update.message.reply_text(f"✅ Этот чат установлен как рабочий (ID: {chat_id})")
         # Сразу отправляем уведомление в новый рабочий чат
-        await send_or_update_master_notification(context)
+        await send_new_master_notification(context)
     else:
         await update.message.reply_text("❌ Ошибка сохранения рабочего чата")
 
@@ -1078,6 +1102,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
    - Непрочитанных сообщений: {len(all_pending)}
    - Флагов автоответов: {flags_manager.count_flags()}
    - Менеджеров в системе: {total_excluded} ({len(excluded_users["user_ids"])} ID + {len(excluded_users["usernames"])} username)
+   - Активных уведомлений: {len(master_notification_manager.get_message_ids())}
 
 ⚙️ **Статистика воронок:**
    - 🟡 Воронка 1: {funnel_1_count} сообщений
@@ -1091,7 +1116,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
    - Более 6 часов: {time_stats['более 6 часов']}
 
 💬 **Рабочий чат:** {'✅ Установлен' if work_chat_manager.is_work_chat_set() else '❌ Не установлен'}
-📢 **Единое уведомление:** {'✅ Активно' if master_notification_manager.get_message_id() else '❌ Не активно'}
+🔄 **Логика уведомлений:** Удаление старого + отправка нового каждые 15 минут
 🕐 **Текущее время:** {now.strftime('%H:%M:%S')}
     """
     
@@ -1152,7 +1177,7 @@ async def clear_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     if removed_count > 0:
         await update.message.reply_text(f"✅ Удалено {removed_count} сообщений из этого чата")
-        await send_or_update_master_notification(context)
+        await send_new_master_notification(context)
     else:
         await update.message.reply_text("✅ В этом чате нет непрочитанных сообщений")
 
@@ -1166,7 +1191,7 @@ async def clear_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     removed_count = pending_messages_manager.clear_all()
     await update.message.reply_text(f"✅ Удалены все непрочитанные сообщения ({removed_count} шт.)")
-    await send_or_update_master_notification(context)
+    await send_new_master_notification(context)
 
 # ========== КОМАНДЫ УПРАВЛЕНИЯ ИСКЛЮЧЕНИЯМИ ==========
 
@@ -1312,7 +1337,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.info(f"✅ Добавлено в непрочитанные: чат '{chat_title}', пользователь {update.message.from_user.id}")
             
             # Обновляем уведомление при новом сообщении
-            await send_or_update_master_notification(context)
+            await send_new_master_notification(context)
 
 async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update or not update.message:
@@ -1357,7 +1382,7 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         logger.info(f"✅ Добавлено в непрочитанные: пользователь {first_name or username or user_id}")
         
         # Обновляем уведомление при новом сообщении
-        await send_or_update_master_notification(context)
+        await send_new_master_notification(context)
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"💥 Ошибка при обработке сообщения: {context.error}")
@@ -1430,11 +1455,11 @@ def main():
         # Обработчик ошибок
         application.add_error_handler(error_handler)
         
-        # Периодическая проверка и обновление уведомления (каждые 15 минут)
+        # Периодическая проверка и отправка нового уведомления (каждые 15 минут)
         job_queue = application.job_queue
         if job_queue:
-            job_queue.run_repeating(check_and_update_master_notification, interval=900, first=10)  # 15 минут
-            print("✅ Планировщик задач запущен (обновление каждые 15 минут)")
+            job_queue.run_repeating(check_and_send_new_notification, interval=900, first=10)  # 15 минут
+            print("✅ Планировщик задач запущен (удаление старого + отправка нового каждые 15 минут)")
         else:
             print("❌ Планировщик задач недоступен")
         
@@ -1454,6 +1479,7 @@ def main():
         else:
             print("⚠️ Рабочий чат не установлен! Используйте /set_work_chat")
         
+        print("🔄 Логика уведомлений: УДАЛЕНИЕ СТАРОГО + ОТПРАВКА НОВОГО каждые 15 минут")
         print("⏰ Ожидание сообщений...")
         print("=" * 50)
         

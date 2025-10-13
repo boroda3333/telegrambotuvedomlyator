@@ -1119,10 +1119,398 @@ async def update_notification_command(update: Update, context: ContextTypes.DEFA
     else:
         await update.message.reply_text("❌ Ошибка обновления уведомления")
 
-# Остальные команды остаются без изменений...
-# [set_work_chat_command, managers_command, stats_command, pending_command, clear_chat_command, clear_all_command, 
-#  add_exception_command, remove_exception_command, list_exceptions_command, clear_exceptions_command,
-#  handle_group_message, handle_private_message, error_handler] 
+async def set_work_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    chat_id = update.message.chat.id
+    if work_chat_manager.save_work_chat(chat_id):
+        await update.message.reply_text(f"✅ Этот чат установлен как рабочий (ID: {chat_id})")
+        # Сразу отправляем уведомление в новый рабочий чат (форсированно)
+        await send_new_master_notification(context, force=True)
+    else:
+        await update.message.reply_text("❌ Ошибка сохранения рабочего чата")
+
+async def managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    excluded_users = excluded_users_manager.get_all_excluded()
+    
+    if not excluded_users["user_ids"] and not excluded_users["usernames"]:
+        await update.message.reply_text("📝 Список менеджеров пуст")
+        return
+    
+    text = "👥 **СПИСОК МЕНЕДЖЕРОВ**\n\n"
+    
+    if excluded_users["user_ids"]:
+        text += "🆔 **По ID:**\n"
+        for i, user_id in enumerate(excluded_users["user_ids"], 1):
+            text += f"{i}. `{user_id}`\n"
+        text += "\n"
+    
+    if excluded_users["usernames"]:
+        text += "👤 **По username:**\n"
+        for i, username in enumerate(excluded_users["usernames"], 1):
+            text += f"{i}. `@{username}`\n"
+    
+    text += f"\n📊 Всего: {len(excluded_users['user_ids'])} ID + {len(excluded_users['usernames'])} username"
+    
+    await update.message.reply_text(text, parse_mode='Markdown')
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    all_pending = pending_messages_manager.get_all_pending_messages()
+    excluded_users = excluded_users_manager.get_all_excluded()
+    total_excluded = len(excluded_users["user_ids"]) + len(excluded_users["usernames"])
+    
+    now = datetime.now(MOSCOW_TZ)
+    time_stats = {"менее 1 часа": 0, "1-3 часа": 0, "3-6 часов": 0, "более 6 часов": 0}
+    
+    for message in all_pending:
+        timestamp = datetime.fromisoformat(message['timestamp'])
+        time_diff = now - timestamp
+        hours_passed = time_diff.total_seconds() / 3600
+        
+        if hours_passed < 1:
+            time_stats["менее 1 часа"] += 1
+        elif hours_passed < 3:
+            time_stats["1-3 часа"] += 1
+        elif hours_passed < 6:
+            time_stats["3-6 часов"] += 1
+        else:
+            time_stats["более 6 часов"] += 1
+    
+    # Статистика по воронкам
+    funnel_1_count = len(pending_messages_manager.get_messages_for_funnel(1, funnels_state_manager))
+    funnel_2_count = len(pending_messages_manager.get_messages_for_funnel(2, funnels_state_manager))
+    funnel_3_count = len(pending_messages_manager.get_messages_for_funnel(3, funnels_state_manager))
+    
+    # Время последнего уведомления
+    last_notification = master_notification_manager.last_notification_time
+    last_notification_str = last_notification.strftime('%H:%M:%S') if last_notification else "Никогда"
+    
+    stats_text = f"""
+📈 **СТАТИСТИКА СИСТЕМЫ**
+
+📊 **Общая статистика:**
+   - Непрочитанных сообщений: {len(all_pending)}
+   - Флагов автоответов: {flags_manager.count_flags()}
+   - Менеджеров в системе: {total_excluded} ({len(excluded_users["user_ids"])} ID + {len(excluded_users["usernames"])} username)
+   - Последнее уведомление: {last_notification_str}
+
+⚙️ **Статистика воронок:**
+   - 🟡 Воронка 1: {funnel_1_count} сообщений
+   - 🟠 Воронка 2: {funnel_2_count} сообщений  
+   - 🔴 Воронка 3: {funnel_3_count} сообщений
+
+⏱ **Время ожидания ответа:**
+   - Менее 1 часа: {time_stats['менее 1 часа']}
+   - 1-3 часа: {time_stats['1-3 часа']}
+   - 3-6 часов: {time_stats['3-6 часов']}
+   - Более 6 часов: {time_stats['более 6 часов']}
+
+💬 **Рабочий чат:** {'✅ Установлен' if work_chat_manager.is_work_chat_set() else '❌ Не установлен'}
+🔄 **Логика уведомлений:** Удаление старого + отправка нового каждые 15 минут
+⏳ **Cooldown:** {'✅ Активен' if not master_notification_manager.should_update() else '❌ Можно отправлять'}
+🔒 **Последовательность:** ✅ Строгая (1→2→3)
+🕐 **Текущее время:** {now.strftime('%H:%M:%S')}
+    """
+    
+    await update.message.reply_text(stats_text, parse_mode='Markdown')
+
+async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    all_pending = pending_messages_manager.get_all_pending_messages()
+    
+    if not all_pending:
+        await update.message.reply_text("✅ Нет непрочитанных сообщений")
+        return
+    
+    chats_messages = {}
+    for message in all_pending:
+        chat_id = message['chat_id']
+        if chat_id not in chats_messages:
+            chats_messages[chat_id] = []
+        chats_messages[chat_id].append(message)
+    
+    pending_text = f"📋 **НЕПРОЧИТАННЫЕ СООБЩЕНИЯ**\n\nВсего сообщений: {len(all_pending)}\nЧатов: {len(chats_messages)}\n\n"
+    
+    for i, (chat_id, messages) in enumerate(chats_messages.items(), 1):
+        chat_display = get_chat_display_name(messages[0])
+        oldest = min(msg['timestamp'] for msg in messages)
+        time_ago = format_time_ago(oldest)
+        
+        # Определяем текущую воронку для чата
+        current_funnel = max([msg.get('current_funnel', 0) for msg in messages])
+        funnel_emoji = get_funnel_emoji(current_funnel) if current_funnel > 0 else "⚪"
+        
+        pending_text += f"{i}. {chat_display} {funnel_emoji}\n"
+        pending_text += f"   📝 Сообщений: {len(messages)}\n"
+        pending_text += f"   ⏰ Самое старое: {time_ago} назад\n"
+        pending_text += f"   🚀 Текущая воронка: {current_funnel}\n\n"
+    
+    if len(pending_text) > 4000:
+        pending_text = pending_text[:4000] + "\n\n... (сообщение обрезано)"
+    
+    await update.message.reply_text(pending_text, parse_mode='Markdown')
+
+async def clear_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    chat_id = update.message.chat.id
+    removed_count = pending_messages_manager.remove_all_chat_messages(chat_id)
+    
+    if removed_count > 0:
+        await update.message.reply_text(f"✅ Удалено {removed_count} сообщений из этого чата")
+        logger.info(f"✅ Удалены сообщения из чата {chat_id}")
+    else:
+        await update.message.reply_text("✅ В этом чате нет непрочитанных сообщений")
+
+async def clear_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    removed_count = pending_messages_manager.clear_all()
+    await update.message.reply_text(f"✅ Удалены все непрочитанные сообщения ({removed_count} шт.)")
+    logger.info("✅ Все сообщения очищены")
+
+# ========== КОМАНДЫ УПРАВЛЕНИЯ ИСКЛЮЧЕНИЯМИ ==========
+
+async def add_exception_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("❌ Использование: /add_exception <ID или @username>")
+        return
+    
+    identifier = context.args[0]
+    
+    if identifier.isdigit():
+        user_id = int(identifier)
+        if excluded_users_manager.add_user_id(user_id):
+            await update.message.reply_text(f"✅ ID `{user_id}` добавлен в исключения")
+        else:
+            await update.message.reply_text(f"ℹ️ ID `{user_id}` уже в исключениях")
+    else:
+        if excluded_users_manager.add_username(identifier):
+            await update.message.reply_text(f"✅ Username `{identifier}` добавлен в исключения")
+        else:
+            await update.message.reply_text(f"ℹ️ Username `{identifier}` уже в исключениях")
+
+async def remove_exception_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("❌ Использование: /remove_exception <ID или @username>")
+        return
+    
+    identifier = context.args[0]
+    
+    if identifier.isdigit():
+        user_id = int(identifier)
+        if excluded_users_manager.remove_user_id(user_id):
+            await update.message.reply_text(f"✅ ID `{user_id}` удален из исключений")
+        else:
+            await update.message.reply_text(f"❌ ID `{user_id}` не найден в исключениях")
+    else:
+        if excluded_users_manager.remove_username(identifier):
+            await update.message.reply_text(f"✅ Username `{identifier}` удален из исключений")
+        else:
+            await update.message.reply_text(f"❌ Username `{identifier}` не найден в исключениях")
+
+async def list_exceptions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    excluded_users = excluded_users_manager.get_all_excluded()
+    
+    if not excluded_users["user_ids"] and not excluded_users["usernames"]:
+        await update.message.reply_text("📝 Список исключений пуст")
+        return
+    
+    text = "👥 **СПИСОК ИСКЛЮЧЕННЫХ ПОЛЬЗОВАТЕЛЕЙ**\n\n"
+    
+    if excluded_users["user_ids"]:
+        text += "🆔 **По ID:**\n"
+        for i, user_id in enumerate(excluded_users["user_ids"], 1):
+            text += f"{i}. `{user_id}`\n"
+        text += "\n"
+    
+    if excluded_users["usernames"]:
+        text += "👤 **По username:**\n"
+        for i, username in enumerate(excluded_users["usernames"], 1):
+            text += f"{i}. `@{username}`\n"
+    
+    text += f"\n📊 Всего: {len(excluded_users['user_ids'])} ID + {len(excluded_users['usernames'])} username"
+    
+    await update.message.reply_text(text, parse_mode='Markdown')
+
+async def clear_exceptions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    excluded_users_manager.clear_all()
+    await update.message.reply_text("✅ Все исключения очищены")
+
+# ========== ОБРАБОТЧИКИ СООБЩЕНИЙ ==========
+
+async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    logger.info(f"📨 Получено групповое сообщение: {update.message.chat.title} - {update.message.text[:50] if update.message.text else '[без текста]'}...")
+    
+    username = update.message.from_user.username
+    if is_manager(update.message.from_user.id, username):
+        await handle_manager_reply(update, context)
+        return
+    
+    if not should_respond_to_message(update, context):
+        logger.info("❌ Сообщение не требует обработки")
+        return
+    
+    if update.message.chat.type in ['group', 'supergroup']:
+        if not is_working_hours():
+            chat_id = update.message.chat.id
+            replied_key = f'chat_{chat_id}'
+            if not flags_manager.has_replied(replied_key):
+                await update.message.reply_text(AUTO_REPLY_MESSAGE)
+                flags_manager.set_replied(replied_key)
+                logger.info(f"✅ Автоответ отправлен в чат {chat_id}")
+        else:
+            chat_id = update.message.chat.id
+            replied_key = f'chat_{chat_id}'
+            if flags_manager.has_replied(replied_key):
+                flags_manager.clear_replied(replied_key)
+            
+            chat_title = update.message.chat.title
+            username = update.message.from_user.username
+            first_name = update.message.from_user.first_name
+            message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
+            
+            pending_messages_manager.add_message(
+                chat_id=update.message.chat.id,
+                user_id=update.message.from_user.id,
+                message_text=message_text,
+                message_id=update.message.message_id,
+                chat_title=chat_title,
+                username=username,
+                first_name=first_name
+            )
+            logger.info(f"✅ Добавлено в непрочитанные: чат '{chat_title}', пользователь {update.message.from_user.id}")
+            
+            # НЕ отправляем уведомление автоматически при новом сообщении - только по расписанию
+            logger.info("📝 Новое сообщение добавлено, уведомление будет отправлено по расписанию")
+
+async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.message:
+        return
+        
+    logger.info(f"📨 Получено личное сообщение от {update.message.from_user.id}: {update.message.text[:50] if update.message.text else '[без текста]'}...")
+    
+    username = update.message.from_user.username
+    if is_manager(update.message.from_user.id, username):
+        await handle_manager_reply(update, context)
+        return
+    
+    if not should_respond_to_message(update, context):
+        logger.info("❌ Сообщение не требует обработки")
+        return
+    
+    if not is_working_hours():
+        user_id = update.message.from_user.id
+        replied_key = f'user_{user_id}'
+        if not flags_manager.has_replied(replied_key):
+            await update.message.reply_text(AUTO_REPLY_MESSAGE)
+            flags_manager.set_replied(replied_key)
+            logger.info(f"✅ Автоответ отправлен пользователю {user_id}")
+    else:
+        user_id = update.message.from_user.id
+        replied_key = f'user_{user_id}'
+        if flags_manager.has_replied(replied_key):
+            flags_manager.clear_replied(replied_key)
+        
+        username = update.message.from_user.username
+        first_name = update.message.from_user.first_name
+        message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
+        
+        pending_messages_manager.add_message(
+            chat_id=update.message.chat.id,
+            user_id=update.message.from_user.id,
+            message_text=message_text,
+            message_id=update.message.message_id,
+            username=username,
+            first_name=first_name
+        )
+        logger.info(f"✅ Добавлено в непрочитанные: пользователь {first_name or username or user_id}")
+        
+        # НЕ отправляем уведомление автоматически при новом сообщении - только по расписанию
+        logger.info("📝 Новое сообщение добавлено, уведомление будет отправлено по расписанию")
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(f"💥 Ошибка при обработке сообщения: {context.error}")
+    
+    if update:
+        logger.error(f"💥 Update object: {update}")
+        if update.message:
+            logger.error(f"💥 Message info: chat_id={update.message.chat.id}, user_id={update.message.from_user.id if update.message.from_user else 'None'}")
+    
+    try:
+        for admin_id in ADMIN_IDS:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=f"💥 Произошла ошибка в боте:\n\n{context.error}"
+            )
+    except Exception as e:
+        logger.error(f"❌ Не удалось отправить уведомление об ошибке: {e}")
 
 # ========== ЗАПУСК БОТА ==========
 

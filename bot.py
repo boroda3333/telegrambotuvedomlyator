@@ -645,8 +645,9 @@ def format_time_ago(timestamp: str) -> str:
     now = datetime.now(MOSCOW_TZ)
     time_diff = now - message_time
     
-    hours = int(time_diff.total_seconds() / 3600)
-    minutes = int((time_diff.total_seconds() % 3600) / 60)
+    total_minutes = int(time_diff.total_seconds() / 60)
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
     
     if hours > 0:
         return f"{hours}ч {minutes}м"
@@ -712,20 +713,41 @@ def create_master_notification_text() -> str:
     for msg in funnel_1_messages:
         chat_id = msg['chat_id']
         if chat_id not in funnel_1_chats:
-            funnel_1_chats[chat_id] = []
-        funnel_1_chats[chat_id].append(msg)
+            funnel_1_chats[chat_id] = {
+                'chat_info': msg,
+                'message_count': 0,
+                'oldest_time': msg['timestamp']
+            }
+        funnel_1_chats[chat_id]['message_count'] += 1
+        # Обновляем самое старое время
+        if msg['timestamp'] < funnel_1_chats[chat_id]['oldest_time']:
+            funnel_1_chats[chat_id]['oldest_time'] = msg['timestamp']
     
     for msg in funnel_2_messages:
         chat_id = msg['chat_id']
         if chat_id not in funnel_2_chats:
-            funnel_2_chats[chat_id] = []
-        funnel_2_chats[chat_id].append(msg)
+            funnel_2_chats[chat_id] = {
+                'chat_info': msg,
+                'message_count': 0,
+                'oldest_time': msg['timestamp']
+            }
+        funnel_2_chats[chat_id]['message_count'] += 1
+        # Обновляем самое старое время
+        if msg['timestamp'] < funnel_2_chats[chat_id]['oldest_time']:
+            funnel_2_chats[chat_id]['oldest_time'] = msg['timestamp']
     
     for msg in funnel_3_messages:
         chat_id = msg['chat_id']
         if chat_id not in funnel_3_chats:
-            funnel_3_chats[chat_id] = []
-        funnel_3_chats[chat_id].append(msg)
+            funnel_3_chats[chat_id] = {
+                'chat_info': msg,
+                'message_count': 0,
+                'oldest_time': msg['timestamp']
+            }
+        funnel_3_chats[chat_id]['message_count'] += 1
+        # Обновляем самое старое время
+        if msg['timestamp'] < funnel_3_chats[chat_id]['oldest_time']:
+            funnel_3_chats[chat_id]['oldest_time'] = msg['timestamp']
     
     # Создаем текст уведомления
     notification_text = "📊 **ОБЗОР НЕОТВЕЧЕННЫХ СООБЩЕНИЙ**\n\n"
@@ -733,33 +755,43 @@ def create_master_notification_text() -> str:
     # Воронка 1
     notification_text += f"🟡 {minutes_to_hours_text(FUNNELS[1])} без ответа\n"
     if funnel_1_chats:
-        for chat_id, messages in funnel_1_chats.items():
-            chat_display = get_chat_display_name(messages[0])
-            notification_text += f"{chat_display}\n"
+        for chat_id, chat_data in funnel_1_chats.items():
+            chat_display = get_chat_display_name(chat_data['chat_info'])
+            message_count = chat_data['message_count']
+            time_ago = format_time_ago(chat_data['oldest_time'])
+            notification_text += f"  • {chat_display} ({message_count} сообщ., {time_ago} назад)\n"
     else:
-        notification_text += "Таких нет\n"
+        notification_text += "  Таких нет\n"
     notification_text += "\n"
     
     # Воронка 2
     notification_text += f"🟠 {minutes_to_hours_text(FUNNELS[2])} без ответа\n"
     if funnel_2_chats:
-        for chat_id, messages in funnel_2_chats.items():
-            chat_display = get_chat_display_name(messages[0])
-            notification_text += f"{chat_display}\n"
+        for chat_id, chat_data in funnel_2_chats.items():
+            chat_display = get_chat_display_name(chat_data['chat_info'])
+            message_count = chat_data['message_count']
+            time_ago = format_time_ago(chat_data['oldest_time'])
+            notification_text += f"  • {chat_display} ({message_count} сообщ., {time_ago} назад)\n"
     else:
-        notification_text += "Таких нет\n"
+        notification_text += "  Таких нет\n"
     notification_text += "\n"
     
     # Воронка 3
     notification_text += f"🔴 БОЛЕЕ {minutes_to_hours_text(FUNNELS[3])} без ответа\n"
     if funnel_3_chats:
-        for chat_id, messages in funnel_3_chats.items():
-            chat_display = get_chat_display_name(messages[0])
-            notification_text += f"{chat_display}\n"
+        for chat_id, chat_data in funnel_3_chats.items():
+            chat_display = get_chat_display_name(chat_data['chat_info'])
+            message_count = chat_data['message_count']
+            time_ago = format_time_ago(chat_data['oldest_time'])
+            notification_text += f"  • {chat_display} ({message_count} сообщ., {time_ago} назад)\n"
     else:
-        notification_text += "Таких нет\n"
+        notification_text += "  Таких нет\n"
     
-    # Добавляем время обновления
+    # Добавляем общую статистику
+    total_messages = len(pending_messages_manager.get_all_pending_messages())
+    total_chats = len(set(msg['chat_id'] for msg in pending_messages_manager.get_all_pending_messages()))
+    
+    notification_text += f"\n📈 **ИТОГО:** {total_messages} сообщений в {total_chats} чатах"
     notification_text += f"\n⏰ Обновлено: {datetime.now(MOSCOW_TZ).strftime('%H:%M:%S')}"
     
     return notification_text
@@ -1152,21 +1184,44 @@ async def debug_funnels_command(update: Update, context: ContextTypes.DEFAULT_TY
     
     debug_text += f"🟡 Воронка 1 ({FUNNELS[1]} мин): {len(funnel_1_messages)} сообщ.\n"
     for msg in funnel_1_messages:
-        debug_text += f"   - {get_chat_display_name(msg)} ({format_time_ago(msg['timestamp'])})\n"
+        chat_display = get_chat_display_name(msg)
+        time_ago = format_time_ago(msg['timestamp'])
+        debug_text += f"   - {chat_display} ({time_ago} назад)\n"
+        debug_text += f"     Текст: {msg['message_text'][:50]}...\n"
+        debug_text += f"     current_funnel: {msg.get('current_funnel', 0)}, funnels_sent: {msg.get('funnels_sent', [])}\n"
     
     debug_text += f"\n🟠 Воронка 2 ({FUNNELS[2]} мин): {len(funnel_2_messages)} сообщ.\n"
     for msg in funnel_2_messages:
-        debug_text += f"   - {get_chat_display_name(msg)} ({format_time_ago(msg['timestamp'])})\n"
+        chat_display = get_chat_display_name(msg)
+        time_ago = format_time_ago(msg['timestamp'])
+        debug_text += f"   - {chat_display} ({time_ago} назад)\n"
+        debug_text += f"     Текст: {msg['message_text'][:50]}...\n"
+        debug_text += f"     current_funnel: {msg.get('current_funnel', 0)}, funnels_sent: {msg.get('funnels_sent', [])}\n"
     
     debug_text += f"\n🔴 Воронка 3 ({FUNNELS[3]} мин): {len(funnel_3_messages)} сообщ.\n"
     for msg in funnel_3_messages:
-        debug_text += f"   - {get_chat_display_name(msg)} ({format_time_ago(msg['timestamp'])})\n"
+        chat_display = get_chat_display_name(msg)
+        time_ago = format_time_ago(msg['timestamp'])
+        debug_text += f"   - {chat_display} ({time_ago} назад)\n"
+        debug_text += f"     Текст: {msg['message_text'][:50]}...\n"
+        debug_text += f"     current_funnel: {msg.get('current_funnel', 0)}, funnels_sent: {msg.get('funnels_sent', [])}\n"
     
     # Показываем статусы обработки
     debug_text += f"\n📊 Статусы обработки:\n"
     for funnel_num in [1, 2, 3]:
         processed_count = len(funnels_state_manager.state.get(f"funnel_{funnel_num}_messages_processed", []))
         debug_text += f"   Воронка {funnel_num}: {processed_count} обработано\n"
+    
+    # Показываем все pending сообщения
+    all_pending = pending_messages_manager.get_all_pending_messages()
+    debug_text += f"\n📋 Всего в pending: {len(all_pending)} сообщений\n"
+    for msg in all_pending:
+        chat_display = get_chat_display_name(msg)
+        time_ago = format_time_ago(msg['timestamp'])
+        debug_text += f"   - {chat_display} ({time_ago} назад): current_funnel={msg.get('current_funnel', 0)}, funnels_sent={msg.get('funnels_sent', [])}\n"
+    
+    if len(debug_text) > 4000:
+        debug_text = debug_text[:4000] + "\n\n... (сообщение обрезано)"
     
     await update.message.reply_text(debug_text, parse_mode='Markdown')
 

@@ -671,6 +671,28 @@ async def update_message_funnel_statuses():
     logger.info("🔄 Автоматическое обновление статусов воронок...")
     return pending_messages_manager.update_funnel_statuses()
 
+async def mark_messages_as_processed():
+    """Помечает все сообщения в текущих воронках как обработанные"""
+    processed_count = 0
+    
+    # Помечаем сообщения для каждой воронки как обработанные
+    for funnel_number in [1, 2, 3]:
+        messages = pending_messages_manager.get_messages_for_funnel(funnel_number, funnels_state_manager)
+        for message in messages:
+            message_key = message.get('message_key')
+            if message_key:
+                # Помечаем воронку как отправленную
+                pending_messages_manager.mark_funnel_sent(message_key, funnel_number)
+                # Помечаем сообщение как обработанное для этой воронки
+                funnels_state_manager.add_processed_message(funnel_number, message_key)
+                processed_count += 1
+                logger.info(f"✅ Сообщение {message_key} помечено как обработанное в воронке {funnel_number}")
+    
+    if processed_count > 0:
+        logger.info(f"✅ Помечено {processed_count} сообщений как обработанные")
+    
+    return processed_count
+
 # ========== СИСТЕМА ЕДИНОГО УВЕДОМЛЕНИЯ ==========
 
 def create_master_notification_text() -> str:
@@ -795,6 +817,10 @@ async def send_new_master_notification(context: ContextTypes.DEFAULT_TYPE, force
         # Сохраняем ID нового сообщения
         master_notification_manager.add_message_id(sent_message.message_id)
         
+        # ПОМЕЧАЕМ СООБЩЕНИЯ КАК ОБРАБОТАННЫЕ ПОСЛЕ ОТПРАВКИ УВЕДОМЛЕНИЯ
+        processed_count = await mark_messages_as_processed()
+        logger.info(f"📝 После отправки уведомления помечено {processed_count} сообщений как обработанные")
+        
         # Обновляем время последней отправки
         master_notification_manager.update_notification_time()
         
@@ -813,7 +839,9 @@ async def check_and_send_new_notification(context: ContextTypes.DEFAULT_TYPE):
     logger.info("🔄 Проверка необходимости отправки уведомления...")
     
     # СНАЧАЛА ОБНОВЛЯЕМ СТАТУСЫ ВСЕХ СООБЩЕНИЙ
-    await update_message_funnel_statuses()
+    updated_count = await update_message_funnel_statuses()
+    if updated_count > 0:
+        logger.info(f"🔄 Обновлено {updated_count} статусов воронок перед отправкой уведомления")
     
     # ПОТОМ ОТПРАВЛЯЕМ УВЕДОМЛЕНИЕ
     await send_new_master_notification(context)
@@ -860,7 +888,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/stats - статистика\n"
         "/help - помощь\n"
         "/update_notification - обновить уведомление\n"
-        "/force_update_funnels - принудительно обновить воронки\n\n"
+        "/force_update_funnels - принудительно обновить воронки\n"
+        "/debug_funnels - отладка воронок\n\n"
         "👥 **Управление исключениями:**\n"
         "/add_exception - добавить исключение\n"
         "/remove_exception - удалить исключение\n"
@@ -887,6 +916,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /set_funnel_3 <минуты> - установить интервал 3-й воронки
 /reset_funnels - сбросить настройки воронок
 /force_update_funnels - принудительно обновить статусы воронок
+/debug_funnels - отладка воронок
 
 **Рабочий чат:**
 /set_work_chat - установить этот чат как рабочий (для уведомлений)
@@ -991,6 +1021,7 @@ async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🔄 Сбросить настройки: `/reset_funnels`
 🚀 Принудительное обновление: `/force_update_funnels`
+🐛 Отладка: `/debug_funnels`
 
 📝 **Логика работы:**
 Единое уведомление обновляется каждые 15 минут
@@ -1101,6 +1132,43 @@ async def force_update_funnels_command(update: Update, context: ContextTypes.DEF
         await send_new_master_notification(context, force=True)
     else:
         await update.message.reply_text("ℹ️ Не требуется обновление статусов воронок")
+
+async def debug_funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда для отладки воронок"""
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    # Получаем все сообщения для каждой воронки
+    FUNNELS = funnels_config.get_funnels()
+    funnel_1_messages = pending_messages_manager.get_messages_for_funnel(1, funnels_state_manager)
+    funnel_2_messages = pending_messages_manager.get_messages_for_funnel(2, funnels_state_manager)
+    funnel_3_messages = pending_messages_manager.get_messages_for_funnel(3, funnels_state_manager)
+    
+    debug_text = "🐛 **ОТЛАДКА ВОРОНОК**\n\n"
+    
+    debug_text += f"🟡 Воронка 1 ({FUNNELS[1]} мин): {len(funnel_1_messages)} сообщ.\n"
+    for msg in funnel_1_messages:
+        debug_text += f"   - {get_chat_display_name(msg)} ({format_time_ago(msg['timestamp'])})\n"
+    
+    debug_text += f"\n🟠 Воронка 2 ({FUNNELS[2]} мин): {len(funnel_2_messages)} сообщ.\n"
+    for msg in funnel_2_messages:
+        debug_text += f"   - {get_chat_display_name(msg)} ({format_time_ago(msg['timestamp'])})\n"
+    
+    debug_text += f"\n🔴 Воронка 3 ({FUNNELS[3]} мин): {len(funnel_3_messages)} сообщ.\n"
+    for msg in funnel_3_messages:
+        debug_text += f"   - {get_chat_display_name(msg)} ({format_time_ago(msg['timestamp'])})\n"
+    
+    # Показываем статусы обработки
+    debug_text += f"\n📊 Статусы обработки:\n"
+    for funnel_num in [1, 2, 3]:
+        processed_count = len(funnels_state_manager.state.get(f"funnel_{funnel_num}_messages_processed", []))
+        debug_text += f"   Воронка {funnel_num}: {processed_count} обработано\n"
+    
+    await update.message.reply_text(debug_text, parse_mode='Markdown')
 
 async def update_notification_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда для ручного обновления уведомления"""
@@ -1247,6 +1315,17 @@ async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Нет непрочитанных сообщений")
         return
     
+    # ОТЛАДОЧНАЯ ИНФОРМАЦИЯ - показываем статусы воронок
+    FUNNELS = funnels_config.get_funnels()
+    funnel_1_count = len(pending_messages_manager.get_messages_for_funnel(1, funnels_state_manager))
+    funnel_2_count = len(pending_messages_manager.get_messages_for_funnel(2, funnels_state_manager))
+    funnel_3_count = len(pending_messages_manager.get_messages_for_funnel(3, funnels_state_manager))
+    
+    debug_info = f"\n🔍 **ОТЛАДКА ВОРОНОК:**\n"
+    debug_info += f"🟡 Воронка 1 ({FUNNELS[1]} мин): {funnel_1_count} сообщ.\n"
+    debug_info += f"🟠 Воронка 2 ({FUNNELS[2]} мин): {funnel_2_count} сообщ.\n"  
+    debug_info += f"🔴 Воронка 3 ({FUNNELS[3]} мин): {funnel_3_count} сообщ.\n\n"
+    
     chats_messages = {}
     for message in all_pending:
         chat_id = message['chat_id']
@@ -1254,7 +1333,8 @@ async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chats_messages[chat_id] = []
         chats_messages[chat_id].append(message)
     
-    pending_text = f"📋 **НЕПРОЧИТАННЫЕ СООБЩЕНИЯ**\n\nВсего сообщений: {len(all_pending)}\nЧатов: {len(chats_messages)}\n\n"
+    pending_text = f"📋 **НЕПРОЧИТАННЫЕ СООБЩЕНИЯ**\n\nВсего сообщений: {len(all_pending)}\nЧатов: {len(chats_messages)}\n"
+    pending_text += debug_info
     
     for i, (chat_id, messages) in enumerate(chats_messages.items(), 1):
         chat_display = get_chat_display_name(messages[0])
@@ -1265,10 +1345,18 @@ async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current_funnel = max([msg.get('current_funnel', 0) for msg in messages])
         funnel_emoji = get_funnel_emoji(current_funnel) if current_funnel > 0 else "⚪"
         
+        # Показываем детальную информацию о воронках для этого чата
+        funnel_details = []
+        for msg in messages:
+            funnel_num = msg.get('current_funnel', 0)
+            funnels_sent = msg.get('funnels_sent', [])
+            funnel_details.append(f"{funnel_num}({','.join(map(str, funnels_sent))})")
+        
         pending_text += f"{i}. {chat_display} {funnel_emoji}\n"
         pending_text += f"   📝 Сообщений: {len(messages)}\n"
         pending_text += f"   ⏰ Самое старое: {time_ago} назад\n"
-        pending_text += f"   🚀 Текущая воронка: {current_funnel}\n\n"
+        pending_text += f"   🚀 Текущая воронка: {current_funnel}\n"
+        pending_text += f"   🔧 Статусы: {', '.join(funnel_details)}\n\n"
     
     if len(pending_text) > 4000:
         pending_text = pending_text[:4000] + "\n\n... (сообщение обрезано)"
@@ -1529,6 +1617,7 @@ def main():
         application.add_handler(CommandHandler("set_funnel_3", set_funnel_3_command))
         application.add_handler(CommandHandler("reset_funnels", reset_funnels_command))
         application.add_handler(CommandHandler("force_update_funnels", force_update_funnels_command))
+        application.add_handler(CommandHandler("debug_funnels", debug_funnels_command))
         
         # Команды для обновления уведомления
         application.add_handler(CommandHandler("update_notification", update_notification_command))
@@ -1574,6 +1663,7 @@ def main():
             print("✅ Планировщик задач запущен (удаление старого + отправка нового каждые 15 минут)")
             print("🛡️  COOLDOWN АКТИВИРОВАН - защита от частых отправок")
             print("🔒 СТРОГАЯ ПОСЛЕДОВАТЕЛЬНОСТЬ - сообщения проходят воронки 1→2→3")
+            print("✅ АВТОМАТИЧЕСКАЯ ОТМЕТКА - сообщения помечаются как обработанные после отправки")
         else:
             print("❌ Планировщик задач недоступен")
         
@@ -1596,6 +1686,7 @@ def main():
         print("🔄 Логика уведомлений: УДАЛЕНИЕ СТАРОГО + ОТПРАВКА НОВОГО каждые 15 минут")
         print("⏳ COOLDOWN: 15 минут между отправками")
         print("🔒 ПОСЛЕДОВАТЕЛЬНОСТЬ: строгая 1→2→3")
+        print("✅ ОТМЕТКА: сообщения помечаются как обработанные после отправки")
         print("⏰ Ожидание сообщений...")
         print("=" * 50)
         

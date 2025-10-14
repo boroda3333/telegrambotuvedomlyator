@@ -467,8 +467,9 @@ class PendingMessagesManager:
         funnel_minutes = FUNNELS[funnel_number]
         
         for message_key, message in self.pending_messages.items():
-            if funnels_state.is_message_processed(funnel_number, message_key):
-                continue
+            # УБРАНА ПРОВЕРКА НА ОБРАБОТАННЫЕ СООБЩЕНИЯ
+            # if funnels_state.is_message_processed(funnel_number, message_key):
+            #     continue
                 
             timestamp = datetime.fromisoformat(message['timestamp'])
             time_diff = now - timestamp
@@ -640,28 +641,6 @@ async def update_message_funnel_statuses():
     logger.info("🔄 Автоматическое обновление статусов воронок...")
     return pending_messages_manager.update_funnel_statuses()
 
-async def mark_messages_as_processed():
-    """Помечает все сообщения в текущих воронках как обработанные"""
-    processed_count = 0
-    
-    # Помечаем сообщения для каждой воронки как обработанные
-    for funnel_number in [1, 2, 3]:
-        messages = pending_messages_manager.get_messages_for_funnel(funnel_number, funnels_state_manager)
-        for message in messages:
-            message_key = message.get('message_key')
-            if message_key:
-                # Помечаем воронку как отправленную
-                pending_messages_manager.mark_funnel_sent(message_key, funnel_number)
-                # Помечаем сообщение как обработанное для этой воронки
-                funnels_state_manager.add_processed_message(funnel_number, message_key)
-                processed_count += 1
-                logger.info(f"✅ Сообщение {message_key} помечено как обработанное в воронке {funnel_number}")
-    
-    if processed_count > 0:
-        logger.info(f"✅ Помечено {processed_count} сообщений как обработанные")
-    
-    return processed_count
-
 # ========== СИСТЕМА ЕДИНОГО УВЕДОМЛЕНИЯ ==========
 
 def create_master_notification_text() -> str:
@@ -814,9 +793,8 @@ async def send_new_master_notification(context: ContextTypes.DEFAULT_TYPE, force
         # Сохраняем ID нового сообщения
         master_notification_manager.add_message_id(sent_message.message_id)
         
-        # ПОМЕЧАЕМ СООБЩЕНИЯ КАК ОБРАБОТАННЫЕ ПОСЛЕ ОТПРАВКИ УВЕДОМЛЕНИЯ
-        processed_count = await mark_messages_as_processed()
-        logger.info(f"📝 После отправки уведомления помечено {processed_count} сообщений как обработанные")
+        # УБРАНА АВТОМАТИЧЕСКАЯ ПОМЕТКА СООБЩЕНИЙ КАК ОБРАБОТАННЫХ
+        # Сообщения будут продолжать показываться пока на них не ответят
         
         # Обновляем время последней отправки
         master_notification_manager.update_notification_time()
@@ -1643,13 +1621,19 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         logger.info("📝 Новое сообщение добавлено, уведомление будет отправлено по расписанию")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик ошибок - логирует в консоль, но не отправляет уведомления в Telegram"""
     logger.error(f"💥 Ошибка при обработке сообщения: {context.error}")
     
     if update:
         logger.error(f"💥 Update object: {update}")
         if update.message:
             logger.error(f"💥 Message info: chat_id={update.message.chat.id}, user_id={update.message.from_user.id if update.message.from_user else 'None'}")
-  
+    
+    # Логируем дополнительную информацию об ошибке
+    logger.error(f"💥 Traceback: {context.error.__traceback__}")
+    
+    # УБРАНА ОТПРАВКА УВЕДОМЛЕНИЙ АДМИНИСТРАТОРАМ
+    # Ошибки будут только в консоли/логах, но не в Telegram
 
 # ========== ЗАПУСК БОТА ==========
 
@@ -1715,7 +1699,7 @@ def main():
             print("✅ Планировщик задач запущен (удаление старого + отправка нового каждые 15 минут)")
             print("🛡️  COOLDOWN АКТИВИРОВАН - защита от частых отправок")
             print("🔧 ЛОГИКА ВОРОНОК: Простая (все подходящие воронки)")
-            print("✅ АВТОМАТИЧЕСКАЯ ОТМЕТКА - сообщения помечаются как обработанные после отправки")
+            print("✅ СООБЩЕНИЯ ПОКАЗЫВАЮТСЯ ПОКА НЕ ОТВЕТЯТ")
         else:
             print("❌ Планировщик задач недоступен")
         
@@ -1738,7 +1722,7 @@ def main():
         print("🔄 Логика уведомлений: УДАЛЕНИЕ СТАРОГО + ОТПРАВКА НОВОГО каждые 15 минут")
         print("⏳ COOLDOWN: 15 минут между отправками")
         print("🔧 ЛОГИКА ВОРОНОК: простая (все подходящие воронки)")
-        print("✅ ОТМЕТКА: сообщения помечаются как обработанные после отправки")
+        print("✅ СООБЩЕНИЯ: показываются пока не ответят")
         print("⏰ Ожидание сообщений...")
         print("=" * 50)
         

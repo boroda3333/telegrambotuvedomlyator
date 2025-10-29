@@ -686,35 +686,35 @@ def is_working_hours():
     return False
 
 def should_respond_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Определяет, нужно ли отправлять автоответ на сообщение"""
     if not update or not update.message:
         return False
     
+    # Игнорируем сообщения от самого бота
     if update.message.from_user.id == context.bot.id:
         return False
         
-    if is_excluded_user(update.message.from_user.id):
+    # Игнорируем менеджеров
+    username = update.message.from_user.username
+    if is_manager(update.message.from_user.id, username):
         return False
         
-    if update.message.new_chat_members or update.message.left_chat_member:
+    # Игнорируем служебные сообщения
+    if (update.message.new_chat_members or 
+        update.message.left_chat_member or 
+        update.message.pinned_message or
+        update.edited_message):
         return False
         
-    if update.message.pinned_message:
-        return False
-        
-    if update.edited_message:
-        return False
-        
-    # НЕ пропускаем команды, которые могут быть кастомными
+    # Игнорируем команды (они обрабатываются отдельно)
     if update.message.text and update.message.text.startswith('/'):
-        command_name = update.message.text.lstrip('/').split(' ')[0].lower()
-        # Проверяем, является ли это кастомной командой
-        if custom_commands_manager.get_command(command_name):
-            return False  # Это кастомная команда - пропускаем для обычной обработки
-        return False  # Это системная команда - не обрабатываем
+        return False
         
+    # Игнорируем пустые сообщения
     if update.message.text and len(update.message.text.strip()) < 1:
         return False
         
+    # Все остальные сообщения обрабатываем
     return True
 
 def get_chat_display_name(chat_data: Dict[str, Any]) -> str:

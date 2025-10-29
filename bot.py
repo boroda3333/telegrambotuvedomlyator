@@ -86,6 +86,13 @@ class CustomCommandsManager:
         # ДИНАМИЧЕСКАЯ РЕГИСТРАЦИЯ ОБРАБОТЧИКА
         global application
         if application:
+            self.register_command_handler(command_name)
+            logger.info(f"✅ Динамически зарегистрирован обработчик для: /{command_name}")
+    
+    def register_command_handler(self, command_name: str):
+        """Регистрирует обработчик для конкретной команды"""
+        global application
+        if application:
             # Удаляем старый обработчик если есть
             for handler in application.handlers[0]:
                 if (isinstance(handler, CommandHandler) and 
@@ -96,7 +103,14 @@ class CustomCommandsManager:
             
             # Добавляем новый обработчик
             application.add_handler(CommandHandler(command_name, handle_custom_command))
-            logger.info(f"✅ Динамически зарегистрирован обработчик для: /{command_name}")
+    
+    def register_all_handlers(self):
+        """Регистрирует обработчики для всех команд при запуске"""
+        global application
+        if application:
+            for command_name in self.commands.keys():
+                self.register_command_handler(command_name)
+            logger.info(f"✅ Зарегистрировано обработчиков для {len(self.commands)} кастомных команд")
     
     def remove_command(self, command_name: str) -> bool:
         """Удаляет команду и её обработчик"""
@@ -706,9 +720,9 @@ def should_respond_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         update.edited_message):
         return False
         
-    # Игнорируем команды (они обрабатываются отдельно)
-    if update.message.text and update.message.text.startswith('/'):
-        return False
+    # НЕ игнорируем команды - они должны обрабатываться отдельно
+    # if update.message.text and update.message.text.startswith('/'):
+    #     return False
         
     # Игнорируем пустые сообщения
     if update.message.text and len(update.message.text.strip()) < 1:
@@ -1307,13 +1321,17 @@ async def handle_custom_command(update: Update, context: ContextTypes.DEFAULT_TY
     command_text = update.message.text
     command_name = command_text.lstrip('/').split(' ')[0].lower()
     
-    logger.info(f"🔍 Обработка команды: '{command_text}' -> извлечено имя: '{command_name}'")
+    logger.info(f"🔍 Обработка кастомной команды: '{command_text}' -> извлечено имя: '{command_name}'")
+    
+    # Отладочная информация
+    all_commands = list(custom_commands_manager.get_all_commands().keys())
+    logger.info(f"📋 Все доступные команды: {all_commands}")
     
     # Ищем команду в кастомных командах
     command = custom_commands_manager.get_command(command_name)
     if not command:
-        logger.error(f"❌ Команда не найдена в базе: /{command_name}")
-        logger.info(f"📋 Доступные команды: {list(custom_commands_manager.get_all_commands().keys())}")
+        logger.error(f"❌ Команда '{command_name}' не найдена в базе")
+        logger.info(f"📋 Доступные команды: {all_commands}")
         return
     
     logger.info(f"🔄 Выполнение кастомной команды: /{command_name} (тип: {command['type']})")
@@ -2003,6 +2021,7 @@ async def update_notification_command(update: Update, context: ContextTypes.DEFA
 # ========== ОБРАБОТЧИКИ СООБЩЕНИЙ ==========
 
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает сообщения в группах"""
     if not update or not update.message:
         return
         
@@ -2011,6 +2030,11 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     username = update.message.from_user.username
     if is_manager(update.message.from_user.id, username):
         await handle_manager_reply(update, context)
+        return
+    
+    # Если это команда - пропускаем, она обработается CommandHandler
+    if update.message.text and update.message.text.startswith('/'):
+        logger.info(f"🔍 Пропускаем команду: {update.message.text}")
         return
     
     if not should_respond_to_message(update, context):
@@ -2051,6 +2075,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.info("📝 Новое сообщение добавлено, уведомление будет отправлено по расписанию")
 
 async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает личные сообщения"""
     if not update or not update.message:
         return
         
@@ -2059,6 +2084,11 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
     username = update.message.from_user.username
     if is_manager(update.message.from_user.id, username):
         await handle_manager_reply(update, context)
+        return
+    
+    # Если это команда - пропускаем, она обработается CommandHandler
+    if update.message.text and update.message.text.startswith('/'):
+        logger.info(f"🔍 Пропускаем команду: {update.message.text}")
         return
     
     if not should_respond_to_message(update, context):
@@ -2155,13 +2185,10 @@ def main():
         
         application = Application.builder().token(BOT_TOKEN).build()
         
-        # СНАЧАЛА регистрируем обработчики кастомных команд (они должны быть ВЫШЕ других обработчиков)
-        custom_commands = custom_commands_manager.get_all_commands()
-        for command_name in custom_commands.keys():
-            application.add_handler(CommandHandler(command_name, handle_custom_command))
-            print(f"✅ Загружен обработчик для команды: /{command_name}")
+        # РЕГИСТРИРУЕМ ВСЕ КАСТОМНЫЕ КОМАНДЫ ПРИ ЗАПУСКЕ
+        custom_commands_manager.register_all_handlers()
         
-        # ОСНОВНЫЕ КОМАНДЫ БОТА (должны быть после кастомных)
+        # ОСНОВНЫЕ КОМАНДЫ БОТА
         application.add_handler(CommandHandler("start", start_command))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("status", status_command))
@@ -2210,16 +2237,14 @@ def main():
         application.add_handler(CommandHandler("managers", managers_command))
         application.add_handler(CommandHandler("stats", stats_command))
         
-        # Обработчики сообщений
+        # Обработчики сообщений (должны быть ПОСЛЕ CommandHandler)
         application.add_handler(MessageHandler(
-            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL, 
-            handle_group_message,
-            block=False
+            filters.TEXT & ~filters.COMMAND | filters.CAPTION | filters.PHOTO | filters.Document.ALL, 
+            handle_group_message
         ))
         application.add_handler(MessageHandler(
-            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL,
-            handle_private_message, 
-            block=False
+            filters.TEXT & ~filters.COMMAND | filters.CAPTION | filters.PHOTO | filters.Document.ALL,
+            handle_private_message
         ))
         
         # Обработчик ошибок

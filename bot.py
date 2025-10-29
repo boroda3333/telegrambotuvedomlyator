@@ -46,6 +46,9 @@ FUNNELS_STATE_FILE = "funnels_state.json"
 MASTER_NOTIFICATION_FILE = "master_notification.json"
 CUSTOM_COMMANDS_FILE = "custom_commands.json"
 
+# Глобальная переменная для доступа к приложению
+application = None
+
 # ========== КЛАСС ДЛЯ УПРАВЛЕНИЯ КАСТОМНЫМИ КОМАНДАМИ ==========
 
 class CustomCommandsManager:
@@ -71,17 +74,32 @@ class CustomCommandsManager:
             logger.error(f"Ошибка сохранения кастомных команд: {e}")
     
     def add_command(self, command_name: str, content_type: str, content: str, description: str = ""):
-        """Добавляет новую команду"""
+        """Добавляет новую команду и сразу регистрирует обработчик"""
         self.commands[command_name] = {
-            'type': content_type,  # 'text', 'photo', 'document', 'video', 'audio'
-            'content': content,    # текст или имя файла
+            'type': content_type,
+            'content': content,
             'description': description,
             'created_at': datetime.now(MOSCOW_TZ).isoformat()
         }
         self.save_commands()
+        
+        # ДИНАМИЧЕСКАЯ РЕГИСТРАЦИЯ ОБРАБОТЧИКА
+        global application
+        if application:
+            # Удаляем старый обработчик если есть
+            for handler in application.handlers[0]:
+                if (isinstance(handler, CommandHandler) and 
+                    handler.commands and 
+                    command_name in handler.commands):
+                    application.handlers[0].remove(handler)
+                    break
+            
+            # Добавляем новый обработчик
+            application.add_handler(CommandHandler(command_name, handle_custom_command))
+            logger.info(f"✅ Динамически зарегистрирован обработчик для: /{command_name}")
     
     def remove_command(self, command_name: str) -> bool:
-        """Удаляет команду"""
+        """Удаляет команду и её обработчик"""
         if command_name in self.commands:
             # Удаляем связанный файл если есть
             cmd = self.commands[command_name]
@@ -93,6 +111,17 @@ class CustomCommandsManager:
                         logger.info(f"✅ Удален файл: {file_path}")
                     except Exception as e:
                         logger.error(f"❌ Ошибка удаления файла {file_path}: {e}")
+            
+            # УДАЛЯЕМ ОБРАБОТЧИК ИЗ ПРИЛОЖЕНИЯ
+            global application
+            if application:
+                for handler in application.handlers[0]:
+                    if (isinstance(handler, CommandHandler) and 
+                        handler.commands and 
+                        command_name in handler.commands):
+                        application.handlers[0].remove(handler)
+                        logger.info(f"✅ Удален обработчик для: /{command_name}")
+                        break
             
             del self.commands[command_name]
             self.save_commands()
@@ -960,7 +989,7 @@ async def create_command_command(update: Update, context: ContextTypes.DEFAULT_T
     if content_type == 'text':
         if not description:
             await update.message.reply_text(
-                f"📝 **СОЗДАНИЕ ТЕКСТОВОЙ КОМАНДЫ** `/@{command_name}`\n\n"
+                f"📝 **СОЗДАНИЕ ТЕКСТОВОЙ КОМАНДЫ** `/{command_name}`\n\n"
                 f"Отправьте текст, который будет показываться при вызове команды:"
             )
             # Сохраняем временные данные
@@ -974,9 +1003,9 @@ async def create_command_command(update: Update, context: ContextTypes.DEFAULT_T
             custom_commands_manager.add_command(command_name, content_type, description, description)
             await update.message.reply_text(
                 f"✅ **Команда создана!**\n\n"
-                f"🆕 `/@{command_name}` - {description}\n"
+                f"🆕 `/{command_name}` - {description}\n"
                 f"📝 Тип: текстовая команда\n\n"
-                f"Теперь пользователи могут использовать `/@{command_name}`"
+                f"Теперь пользователи могут использовать `/{command_name}`"
             )
     
     # Для фото, документов, видео и аудио ждем файл
@@ -989,7 +1018,7 @@ async def create_command_command(update: Update, context: ContextTypes.DEFAULT_T
         }
         
         await update.message.reply_text(
-            f"📎 **СОЗДАНИЕ КОМАНДЫ** `/@{command_name}`\n\n"
+            f"📎 **СОЗДАНИЕ КОМАНДЫ** `/{command_name}`\n\n"
             f"Тип: {content_type}\n"
             f"Описание: {description}\n\n"
             f"📤 **Отправьте файл** ({file_types[content_type]}) "
@@ -1078,10 +1107,10 @@ async def handle_file_for_command(update: Update, context: ContextTypes.DEFAULT_
             
             await update.message.reply_text(
                 f"✅ **Команда создана!**\n\n"
-                f"🆕 `/@{command_name}` - {description}\n"
+                f"🆕 `/{command_name}` - {description}\n"
                 f"{type_emojis.get(content_type, '📎')} Тип: команда с {content_type}\n"
                 f"💾 Файл: {file_name}\n\n"
-                f"Теперь пользователи могут использовать `/@{command_name}`"
+                f"Теперь пользователи могут использовать `/{command_name}`"
             )
             
             logger.info(f"✅ Создана команда /{command_name} с файлом {file_name}")
@@ -1122,10 +1151,10 @@ async def handle_text_for_command(update: Update, context: ContextTypes.DEFAULT_
         
         await update.message.reply_text(
             f"✅ **Текстовая команда создана!**\n\n"
-            f"🆕 `/@{command_name}` - {description}\n"
+            f"🆕 `/{command_name}` - {description}\n"
             f"📝 Тип: текстовая команда\n"
             f"📄 Содержание: {text_content[:100]}{'...' if len(text_content) > 100 else ''}\n\n"
-            f"Теперь пользователи могут использовать `/@{command_name}`"
+            f"Теперь пользователи могут использовать `/{command_name}`"
         )
         
         logger.info(f"✅ Создана текстовая команда /{command_name}")
@@ -1159,7 +1188,7 @@ async def edit_command_command(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     
     await update.message.reply_text(
-        f"✏️ **РЕДАКТИРОВАНИЕ КОМАНДЫ** `/@{command_name}`\n\n"
+        f"✏️ **РЕДАКТИРОВАНИЕ КОМАНДЫ** `/{command_name}`\n\n"
         f"Тип: {command['type']}\n"
         f"Описание: {command['description']}\n\n"
         f"Что вы хотите сделать?\n"
@@ -1230,22 +1259,21 @@ async def list_commands_command(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text(text, parse_mode='Markdown')
 
 async def handle_custom_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает все кастомные команды"""
+    """Обрабатывает ВСЕ кастомные команды"""
     if not update or not update.message:
         return
     
+    # Получаем название команды (без /)
     command_text = update.message.text
-    if not command_text or not command_text.startswith('/'):
-        return
+    command_name = command_text.lstrip('/').split(' ')[0].lower()
     
-    # Извлекаем название команды (убираем / и параметры)
-    command_name = command_text.lstrip('/').split(' ')[0].split('@')[0].lower()
-    
+    # Ищем команду в кастомных командах
     command = custom_commands_manager.get_command(command_name)
     if not command:
-        return  # Не наша кастомная команда
+        logger.error(f"❌ Команда не найдена в базе: /{command_name}")
+        return
     
-    logger.info(f"🔄 Вызов кастомной команды: /{command_name}")
+    logger.info(f"🔄 Выполнение кастомной команды: /{command_name}")
     
     try:
         if command['type'] == 'text':
@@ -1265,6 +1293,7 @@ async def handle_custom_command(update: Update, context: ContextTypes.DEFAULT_TY
                     )
             else:
                 await update.message.reply_text("❌ Файл не найден")
+                logger.error(f"❌ Файл не найден: {file_path}")
         
         elif command['type'] == 'document':
             file_path = os.path.join('assets', command['content'])
@@ -1467,9 +1496,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(status_text, parse_mode='Markdown')
 
-# ========== КОМАНДЫ УПРАВЛЕНИЯ ВОРОНКАМИ ==========
-
 async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать текущие настройки воронок"""
     if not update or not update.message:
         return
         
@@ -1479,34 +1507,20 @@ async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     FUNNELS = funnels_config.get_funnels()
     
-    funnels_text = f"""
-⚙️ **ТЕКУЩИЕ НАСТРОЙКИ ВОРОНОК**
-
-🟡 **Воронка 1 (начальное уведомление):**
-   - Интервал: {FUNNELS[1]} минут ({minutes_to_hours_text(FUNNELS[1])})
-   - Команда: `/set_funnel_1 <минуты>`
-
-🟠 **Воронка 2 (повторное уведомление):**
-   - Интервал: {FUNNELS[2]} минут ({minutes_to_hours_text(FUNNELS[2])})
-   - Команда: `/set_funnel_2 <минуты>`
-
-🔴 **Воронка 3 (срочное уведомление):**
-   - Интервал: {FUNNELS[3]} минут ({minutes_to_hours_text(FUNNELS[3])})
-   - Команда: `/set_funnel_3 <минуты>`
-
-🔄 Сбросить настройки: `/reset_funnels`
-🚀 Принудительное обновление: `/force_update_funnels`
-
-📝 **Логика работы:**
-Единое уведомление обновляется каждые 15 минут
-**СТАРОЕ УДАЛЯЕТСЯ, ОТПРАВЛЯЕТСЯ НОВОЕ**
-**COOLDOWN 15 МИНУТ** - защита от частых отправок
-**БЕЗ ДУБЛИРОВАНИЯ** - каждый чат показывается только в одной воронке
-    """
+    text = "⚙️ **НАСТРОЙКИ ВОРОНОК УВЕДОМЛЕНИЙ**\n\n"
+    text += f"🟡 Воронка 1: {FUNNELS[1]} минут ({minutes_to_hours_text(FUNNELS[1])})\n"
+    text += f"🟠 Воронка 2: {FUNNELS[2]} минут ({minutes_to_hours_text(FUNNELS[2])})\n"
+    text += f"🔴 Воронка 3: {FUNNELS[3]} минут ({minutes_to_hours_text(FUNNELS[3])})\n\n"
+    text += "💡 **Команды для изменения:**\n"
+    text += "/set_funnel_1 <минуты> - установить 1-ю воронку\n"
+    text += "/set_funnel_2 <минуты> - установить 2-ю воронку\n"
+    text += "/set_funnel_3 <минуты> - установить 3-ю воронку\n"
+    text += "/reset_funnels - сбросить настройки по умолчанию"
     
-    await update.message.reply_text(funnels_text, parse_mode='Markdown')
+    await update.message.reply_text(text, parse_mode='Markdown')
 
 async def set_funnel_1_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Установить интервал для воронки 1"""
     if not update or not update.message:
         return
         
@@ -1514,22 +1528,25 @@ async def set_funnel_1_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
     
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("❌ Использование: /set_funnel_1 <минуты>")
+    if not context.args:
+        await update.message.reply_text("❌ Укажите интервал в минутах: /set_funnel_1 <минуты>")
         return
     
-    minutes = int(context.args[0])
-    if minutes <= 0:
-        await update.message.reply_text("❌ Количество минут должно быть положительным числом")
-        return
-    
-    if funnels_config.set_funnel_interval(1, minutes):
-        await update.message.reply_text(f"✅ Воронка 1 установлена на {minutes} минут ({minutes_to_hours_text(minutes)})")
-        logger.info("✅ Настройки воронки 1 обновлены")
-    else:
-        await update.message.reply_text("❌ Ошибка установки интервала воронки")
+    try:
+        minutes = int(context.args[0])
+        if minutes <= 0:
+            await update.message.reply_text("❌ Интервал должен быть положительным числом")
+            return
+        
+        if funnels_config.set_funnel_interval(1, minutes):
+            await update.message.reply_text(f"✅ Воронка 1 установлена на {minutes} минут ({minutes_to_hours_text(minutes)})")
+        else:
+            await update.message.reply_text("❌ Ошибка при установке воронки")
+    except ValueError:
+        await update.message.reply_text("❌ Укажите корректное число минут")
 
 async def set_funnel_2_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Установить интервал для воронки 2"""
     if not update or not update.message:
         return
         
@@ -1537,22 +1554,25 @@ async def set_funnel_2_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
     
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("❌ Использование: /set_funnel_2 <минуты>")
+    if not context.args:
+        await update.message.reply_text("❌ Укажите интервал в минутах: /set_funnel_2 <минуты>")
         return
     
-    minutes = int(context.args[0])
-    if minutes <= 0:
-        await update.message.reply_text("❌ Количество минут должно быть положительным числом")
-        return
-    
-    if funnels_config.set_funnel_interval(2, minutes):
-        await update.message.reply_text(f"✅ Воронка 2 установлена на {minutes} минут ({minutes_to_hours_text(minutes)})")
-        logger.info("✅ Настройки воронки 2 обновлены")
-    else:
-        await update.message.reply_text("❌ Ошибка установки интервала воронки")
+    try:
+        minutes = int(context.args[0])
+        if minutes <= 0:
+            await update.message.reply_text("❌ Интервал должен быть положительным числом")
+            return
+        
+        if funnels_config.set_funnel_interval(2, minutes):
+            await update.message.reply_text(f"✅ Воронка 2 установлена на {minutes} минут ({minutes_to_hours_text(minutes)})")
+        else:
+            await update.message.reply_text("❌ Ошибка при установке воронки")
+    except ValueError:
+        await update.message.reply_text("❌ Укажите корректное число минут")
 
 async def set_funnel_3_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Установить интервал для воронки 3"""
     if not update or not update.message:
         return
         
@@ -1560,22 +1580,25 @@ async def set_funnel_3_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
     
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("❌ Использование: /set_funnel_3 <минуты>")
+    if not context.args:
+        await update.message.reply_text("❌ Укажите интервал в минутах: /set_funnel_3 <минуты>")
         return
     
-    minutes = int(context.args[0])
-    if minutes <= 0:
-        await update.message.reply_text("❌ Количество минут должно быть положительным числом")
-        return
-    
-    if funnels_config.set_funnel_interval(3, minutes):
-        await update.message.reply_text(f"✅ Воронка 3 установлена на {minutes} минут ({minutes_to_hours_text(minutes)})")
-        logger.info("✅ Настройки воронки 3 обновлены")
-    else:
-        await update.message.reply_text("❌ Ошибка установки интервала воронки")
+    try:
+        minutes = int(context.args[0])
+        if minutes <= 0:
+            await update.message.reply_text("❌ Интервал должен быть положительным числом")
+            return
+        
+        if funnels_config.set_funnel_interval(3, minutes):
+            await update.message.reply_text(f"✅ Воронка 3 установлена на {minutes} минут ({minutes_to_hours_text(minutes)})")
+        else:
+            await update.message.reply_text("❌ Ошибка при установке воронки")
+    except ValueError:
+        await update.message.reply_text("❌ Укажите корректное число минут")
 
 async def reset_funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сбросить настройки воронок к значениям по умолчанию"""
     if not update or not update.message:
         return
         
@@ -1585,10 +1608,9 @@ async def reset_funnels_command(update: Update, context: ContextTypes.DEFAULT_TY
     
     funnels_config.reset_to_default()
     await update.message.reply_text("✅ Настройки воронок сброшены к значениям по умолчанию")
-    logger.info("✅ Настройки воронок сброшены")
 
 async def force_update_funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Принудительно обновляет статусы воронок для всех сообщений"""
+    """Принудительно обновить статусы воронок"""
     if not update or not update.message:
         return
         
@@ -1596,20 +1618,11 @@ async def force_update_funnels_command(update: Update, context: ContextTypes.DEF
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
     
-    await update.message.reply_text("🔄 Принудительное обновление статусов воронок...")
-    
     updated_count = await update_message_funnel_statuses()
-    
-    if updated_count > 0:
-        await update.message.reply_text(f"✅ Обновлено статусов воронок: {updated_count} сообщений")
-        # Сразу отправляем обновленное уведомление
-        await send_new_master_notification(context, force=True)
-    else:
-        await update.message.reply_text("ℹ️ Не требуется обновление статусов воронок")
-
-# ========== КОМАНДЫ УПРАВЛЕНИЯ РАБОЧИМ ЧАТОМ ==========
+    await update.message.reply_text(f"✅ Принудительно обновлены статусы воронок для {updated_count} сообщений")
 
 async def set_work_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Установить текущий чат как рабочий для уведомлений"""
     if not update or not update.message:
         return
         
@@ -1619,67 +1632,12 @@ async def set_work_chat_command(update: Update, context: ContextTypes.DEFAULT_TY
     
     chat_id = update.message.chat.id
     if work_chat_manager.save_work_chat(chat_id):
-        await update.message.reply_text(f"✅ Этот чат установлен как рабочий (ID: {chat_id})")
-        # Сразу отправляем уведомление в новый рабочий чат (форсированно)
-        await send_new_master_notification(context, force=True)
+        await update.message.reply_text(f"✅ Этот чат установлен как рабочий для уведомлений (ID: {chat_id})")
     else:
-        await update.message.reply_text("❌ Ошибка сохранения рабочего чата")
+        await update.message.reply_text("❌ Ошибка при установке рабочего чата")
 
-# ========== КОМАНДЫ УПРАВЛЕНИЯ ИСКЛЮЧЕНИЯМИ ==========
-
-async def add_exception_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    if not is_admin(update.message.from_user.id):
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
-    
-    if not context.args:
-        await update.message.reply_text("❌ Использование: /add_exception <ID или @username>")
-        return
-    
-    identifier = context.args[0]
-    
-    if identifier.isdigit():
-        user_id = int(identifier)
-        if excluded_users_manager.add_user_id(user_id):
-            await update.message.reply_text(f"✅ ID `{user_id}` добавлен в исключения")
-        else:
-            await update.message.reply_text(f"ℹ️ ID `{user_id}` уже в исключениях")
-    else:
-        if excluded_users_manager.add_username(identifier):
-            await update.message.reply_text(f"✅ Username `{identifier}` добавлен в исключения")
-        else:
-            await update.message.reply_text(f"ℹ️ Username `{identifier}` уже в исключениях")
-
-async def remove_exception_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    if not is_admin(update.message.from_user.id):
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
-    
-    if not context.args:
-        await update.message.reply_text("❌ Использование: /remove_exception <ID или @username>")
-        return
-    
-    identifier = context.args[0]
-    
-    if identifier.isdigit():
-        user_id = int(identifier)
-        if excluded_users_manager.remove_user_id(user_id):
-            await update.message.reply_text(f"✅ ID `{user_id}` удален из исключений")
-        else:
-            await update.message.reply_text(f"❌ ID `{user_id}` не найден в исключениях")
-    else:
-        if excluded_users_manager.remove_username(identifier):
-            await update.message.reply_text(f"✅ Username `{identifier}` удален из исключений")
-        else:
-            await update.message.reply_text(f"❌ Username `{identifier}` не найден в исключениях")
-
-async def list_exceptions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать список менеджеров"""
     if not update or not update.message:
         return
         
@@ -1689,28 +1647,28 @@ async def list_exceptions_command(update: Update, context: ContextTypes.DEFAULT_
     
     excluded_users = excluded_users_manager.get_all_excluded()
     
-    if not excluded_users["user_ids"] and not excluded_users["usernames"]:
-        await update.message.reply_text("📝 Список исключений пуст")
-        return
+    text = "👥 **СПИСОК МЕНЕДЖЕРОВ**\n\n"
     
-    text = "👥 **СПИСОК ИСКЛЮЧЕННЫХ ПОЛЬЗОВАТЕЛЕЙ**\n\n"
-    
+    text += "🔹 **По ID пользователей:**\n"
     if excluded_users["user_ids"]:
-        text += "🆔 **По ID:**\n"
-        for i, user_id in enumerate(excluded_users["user_ids"], 1):
-            text += f"{i}. `{user_id}`\n"
-        text += "\n"
+        for user_id in excluded_users["user_ids"]:
+            text += f"  • {user_id}\n"
+    else:
+        text += "  Нет пользователей по ID\n"
     
+    text += "\n🔹 **По username:**\n"
     if excluded_users["usernames"]:
-        text += "👤 **По username:**\n"
-        for i, username in enumerate(excluded_users["usernames"], 1):
-            text += f"{i}. `@{username}`\n"
+        for username in excluded_users["usernames"]:
+            text += f"  • @{username}\n"
+    else:
+        text += "  Нет пользователей по username\n"
     
-    text += f"\n📊 Всего: {len(excluded_users['user_ids'])} ID + {len(excluded_users['usernames'])} username"
+    text += f"\n📊 Всего менеджеров: {len(excluded_users['user_ids']) + len(excluded_users['usernames'])}"
     
     await update.message.reply_text(text, parse_mode='Markdown')
 
-async def clear_exceptions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать статистику"""
     if not update or not update.message:
         return
         
@@ -1718,63 +1676,91 @@ async def clear_exceptions_command(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
     
-    excluded_users_manager.clear_all()
-    await update.message.reply_text("✅ Все исключения очищены")
-
-# ========== КОМАНДЫ УПРАВЛЕНИЯ СООБЩЕНИЯМИ ==========
-
-async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.message:
-        return
-        
-    if not is_admin(update.message.from_user.id):
-        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
-        return
+    all_messages = pending_messages_manager.get_all_pending_messages()
+    flags_count = flags_manager.count_flags()
+    excluded_users = excluded_users_manager.get_all_excluded()
+    total_excluded = len(excluded_users["user_ids"]) + len(excluded_users["usernames"])
     
-    all_pending = pending_messages_manager.get_all_pending_messages()
-    
-    if not all_pending:
-        await update.message.reply_text("✅ Нет непрочитанных сообщений")
-        return
-    
-    # Группируем по чатам
+    # Группируем сообщения по чатам
     chats_data = {}
-    for msg in all_pending:
+    for msg in all_messages:
         chat_id = msg['chat_id']
         if chat_id not in chats_data:
             chats_data[chat_id] = {
-                'chat_info': msg,
+                'count': 0,
+                'title': msg.get('chat_title', f'Чат {chat_id}'),
+                'oldest': msg['timestamp']
+            }
+        chats_data[chat_id]['count'] += 1
+        if msg['timestamp'] < chats_data[chat_id]['oldest']:
+            chats_data[chat_id]['oldest'] = msg['timestamp']
+    
+    text = "📊 **СТАТИСТИКА СИСТЕМЫ**\n\n"
+    text += f"📨 **Непрочитанные сообщения:** {len(all_messages)}\n"
+    text += f"💬 **Активные чаты:** {len(chats_data)}\n"
+    text += f"🚩 **Флаги автоответов:** {flags_count}\n"
+    text += f"👥 **Менеджеров в системе:** {total_excluded}\n"
+    text += f"🆕 **Кастомных команд:** {len(custom_commands_manager.get_all_commands())}\n\n"
+    
+    text += "📋 **Сообщения по чатам:**\n"
+    if chats_data:
+        for chat_id, data in list(chats_data.items())[:10]:  # Показываем первые 10 чатов
+            time_ago = format_time_ago(data['oldest'])
+            text += f"  • {data['title']}: {data['count']} сообщ. ({time_ago} назад)\n"
+        if len(chats_data) > 10:
+            text += f"  ... и еще {len(chats_data) - 10} чатов\n"
+    else:
+        text += "  Нет непрочитанных сообщений\n"
+    
+    await update.message.reply_text(text, parse_mode='Markdown')
+
+async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать список непрочитанных сообщений"""
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    all_messages = pending_messages_manager.get_all_pending_messages()
+    
+    if not all_messages:
+        await update.message.reply_text("✅ Нет непрочитанных сообщений")
+        return
+    
+    text = "📋 **НЕПРОЧИТАННЫЕ СООБЩЕНИЯ**\n\n"
+    
+    # Группируем по чатам
+    chats_data = {}
+    for msg in all_messages:
+        chat_id = msg['chat_id']
+        if chat_id not in chats_data:
+            chats_data[chat_id] = {
                 'messages': [],
-                'current_funnel': 0
+                'title': msg.get('chat_title', f'Чат {chat_id}'),
+                'oldest': msg['timestamp']
             }
         chats_data[chat_id]['messages'].append(msg)
+        if msg['timestamp'] < chats_data[chat_id]['oldest']:
+            chats_data[chat_id]['oldest'] = msg['timestamp']
+    
+    for chat_id, data in chats_data.items():
+        time_ago = format_time_ago(data['oldest'])
+        funnel = max(msg.get('current_funnel', 0) for msg in data['messages'])
+        funnel_emoji = get_funnel_emoji(funnel)
         
-        current_funnel = msg.get('current_funnel', 0)
-        if current_funnel > chats_data[chat_id]['current_funnel']:
-            chats_data[chat_id]['current_funnel'] = current_funnel
+        text += f"{funnel_emoji} **{data['title']}**\n"
+        text += f"   📨 Сообщений: {len(data['messages'])}\n"
+        text += f"   ⏰ Самое старое: {time_ago} назад\n"
+        text += f"   🚪 Воронка: {funnel}\n\n"
     
-    pending_text = f"📋 **НЕПРОЧИТАННЫЕ СООБЩЕНИЯ**\n\nВсего сообщений: {len(all_pending)}\nЧатов: {len(chats_data)}\n\n"
+    text += f"📊 Всего: {len(all_messages)} сообщений в {len(chats_data)} чатах"
     
-    for i, (chat_id, chat_data) in enumerate(chats_data.items(), 1):
-        chat_display = get_chat_display_name(chat_data['chat_info'])
-        message_count = len(chat_data['messages'])
-        oldest = min(msg['timestamp'] for msg in chat_data['messages'])
-        time_ago = format_time_ago(oldest)
-        
-        current_funnel = chat_data['current_funnel']
-        funnel_emoji = get_funnel_emoji(current_funnel) if current_funnel > 0 else "⚪"
-        
-        pending_text += f"{i}. {chat_display} {funnel_emoji}\n"
-        pending_text += f"   📝 Сообщений: {message_count}\n"
-        pending_text += f"   ⏰ Самое старое: {time_ago} назад\n"
-        pending_text += f"   🚀 Текущая воронка: {current_funnel}\n\n"
-    
-    if len(pending_text) > 4000:
-        pending_text = pending_text[:4000] + "\n\n... (сообщение обрезано)"
-    
-    await update.message.reply_text(pending_text, parse_mode='Markdown')
+    await update.message.reply_text(text, parse_mode='Markdown')
 
 async def clear_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Очистить сообщения из текущего чата"""
     if not update or not update.message:
         return
         
@@ -1787,11 +1773,13 @@ async def clear_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     if removed_count > 0:
         await update.message.reply_text(f"✅ Удалено {removed_count} сообщений из этого чата")
-        logger.info(f"✅ Удалены сообщения из чата {chat_id}")
+        # Обновляем уведомление
+        await send_new_master_notification(context, force=True)
     else:
         await update.message.reply_text("✅ В этом чате нет непрочитанных сообщений")
 
 async def clear_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Очистить все непрочитанные сообщения"""
     if not update or not update.message:
         return
         
@@ -1800,12 +1788,16 @@ async def clear_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     removed_count = pending_messages_manager.clear_all()
-    await update.message.reply_text(f"✅ Удалены все непрочитанные сообщения ({removed_count} шт.)")
-    logger.info("✅ Все сообщения очищены")
+    
+    if removed_count > 0:
+        await update.message.reply_text(f"✅ Удалены все непрочитанные сообщения ({removed_count} шт.)")
+        # Обновляем уведомление
+        await send_new_master_notification(context, force=True)
+    else:
+        await update.message.reply_text("✅ Нет непрочитанных сообщений для очистки")
 
-# ========== КОМАНДЫ СТАТИСТИКИ ==========
-
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add_exception_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Добавить менеджера в исключения"""
     if not update or not update.message:
         return
         
@@ -1813,81 +1805,37 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
     
-    all_pending = pending_messages_manager.get_all_pending_messages()
-    excluded_users = excluded_users_manager.get_all_excluded()
-    total_excluded = len(excluded_users["user_ids"]) + len(excluded_users["usernames"])
+    if not context.args:
+        await update.message.reply_text(
+            "👥 **ДОБАВИТЬ МЕНЕДЖЕРА**\n\n"
+            "Использование: /add_exception <ID_пользователя или @username>\n\n"
+            "Примеры:\n"
+            "/add_exception 123456789\n"
+            "/add_exception @username"
+        )
+        return
     
-    # Группируем по чатам для статистики воронок
-    chats_data = {}
-    for msg in all_pending:
-        chat_id = msg['chat_id']
-        if chat_id not in chats_data:
-            chats_data[chat_id] = {'current_funnel': 0}
-        
-        current_funnel = msg.get('current_funnel', 0)
-        if current_funnel > chats_data[chat_id]['current_funnel']:
-            chats_data[chat_id]['current_funnel'] = current_funnel
+    identifier = context.args[0]
     
-    funnel_1_count = sum(1 for chat_data in chats_data.values() if chat_data['current_funnel'] == 1)
-    funnel_2_count = sum(1 for chat_data in chats_data.values() if chat_data['current_funnel'] == 2)
-    funnel_3_count = sum(1 for chat_data in chats_data.values() if chat_data['current_funnel'] == 3)
-    
-    now = datetime.now(MOSCOW_TZ)
-    time_stats = {"менее 1 часа": 0, "1-3 часа": 0, "3-6 часов": 0, "более 6 часов": 0}
-    
-    for message in all_pending:
-        timestamp = datetime.fromisoformat(message['timestamp'])
-        time_diff = now - timestamp
-        hours_passed = time_diff.total_seconds() / 3600
-        
-        if hours_passed < 1:
-            time_stats["менее 1 часа"] += 1
-        elif hours_passed < 3:
-            time_stats["1-3 часа"] += 1
-        elif hours_passed < 6:
-            time_stats["3-6 часов"] += 1
+    # Пробуем как ID
+    if identifier.isdigit():
+        user_id = int(identifier)
+        if excluded_users_manager.add_user_id(user_id):
+            await update.message.reply_text(f"✅ Пользователь с ID {user_id} добавлен в менеджеры")
         else:
-            time_stats["более 6 часов"] += 1
-    
-    # Время последнего уведомления
-    last_notification = master_notification_manager.last_notification_time
-    last_notification_str = last_notification.strftime('%H:%M:%S') if last_notification else "Никогда"
-    
-    # Статистика кастомных команд
-    custom_commands = custom_commands_manager.get_all_commands()
-    
-    stats_text = f"""
-📈 **СТАТИСТИКА СИСТЕМЫ**
+            await update.message.reply_text(f"❌ Пользователь с ID {user_id} уже является менеджером")
+    # Или как username
+    elif identifier.startswith('@'):
+        username = identifier.lstrip('@')
+        if excluded_users_manager.add_username(username):
+            await update.message.reply_text(f"✅ Пользователь @{username} добавлен в менеджеры")
+        else:
+            await update.message.reply_text(f"❌ Пользователь @{username} уже является менеджером")
+    else:
+        await update.message.reply_text("❌ Укажите ID пользователя или @username")
 
-📊 **Общая статистика:**
-   - Непрочитанных сообщений: {len(all_pending)}
-   - Чатов с сообщениями: {len(chats_data)}
-   - Флагов автоответов: {flags_manager.count_flags()}
-   - Менеджеров в системе: {total_excluded} ({len(excluded_users["user_ids"])} ID + {len(excluded_users["usernames"])} username)
-   - Кастомных команд: {len(custom_commands)}
-   - Последнее уведомление: {last_notification_str}
-
-⚙️ **Статистика воронок:**
-   - 🟡 Воронка 1: {funnel_1_count} чатов
-   - 🟠 Воронка 2: {funnel_2_count} чатов  
-   - 🔴 Воронка 3: {funnel_3_count} чатов
-
-⏱ **Время ожидания ответа:**
-   - Менее 1 часа: {time_stats['менее 1 часа']}
-   - 1-3 часа: {time_stats['1-3 часа']}
-   - 3-6 часов: {time_stats['3-6 часов']}
-   - Более 6 часов: {time_stats['более 6 часов']}
-
-💬 **Рабочий чат:** {'✅ Установлен' if work_chat_manager.is_work_chat_set() else '❌ Не установлен'}
-🔄 **Логика уведомлений:** Удаление старого + отправка нового каждые 15 минут
-⏳ **Cooldown:** {'✅ Активен' if not master_notification_manager.should_update() else '❌ Можно отправлять'}
-🔧 **Логика воронок:** ✅ Без дублирования (1 чат = 1 воронка)
-🕐 **Текущее время:** {now.strftime('%H:%M:%S')}
-    """
-    
-    await update.message.reply_text(stats_text, parse_mode='Markdown')
-
-async def managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def remove_exception_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удалить менеджера из исключений"""
     if not update or not update.message:
         return
         
@@ -1895,33 +1843,60 @@ async def managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
     
-    excluded_users = excluded_users_manager.get_all_excluded()
-    
-    if not excluded_users["user_ids"] and not excluded_users["usernames"]:
-        await update.message.reply_text("📝 Список менеджеров пуст")
+    if not context.args:
+        await update.message.reply_text(
+            "👥 **УДАЛИТЬ МЕНЕДЖЕРА**\n\n"
+            "Использование: /remove_exception <ID_пользователя или @username>\n\n"
+            "Примеры:\n"
+            "/remove_exception 123456789\n"
+            "/remove_exception @username"
+        )
         return
     
-    text = "👥 **СПИСОК МЕНЕДЖЕРОВ**\n\n"
+    identifier = context.args[0]
     
-    if excluded_users["user_ids"]:
-        text += "🆔 **По ID:**\n"
-        for i, user_id in enumerate(excluded_users["user_ids"], 1):
-            text += f"{i}. `{user_id}`\n"
-        text += "\n"
-    
-    if excluded_users["usernames"]:
-        text += "👤 **По username:**\n"
-        for i, username in enumerate(excluded_users["usernames"], 1):
-            text += f"{i}. `@{username}`\n"
-    
-    text += f"\n📊 Всего: {len(excluded_users['user_ids'])} ID + {len(excluded_users['usernames'])} username"
-    
-    await update.message.reply_text(text, parse_mode='Markdown')
+    # Пробуем как ID
+    if identifier.isdigit():
+        user_id = int(identifier)
+        if excluded_users_manager.remove_user_id(user_id):
+            await update.message.reply_text(f"✅ Пользователь с ID {user_id} удален из менеджеров")
+        else:
+            await update.message.reply_text(f"❌ Пользователь с ID {user_id} не найден в менеджерах")
+    # Или как username
+    elif identifier.startswith('@'):
+        username = identifier.lstrip('@')
+        if excluded_users_manager.remove_username(username):
+            await update.message.reply_text(f"✅ Пользователь @{username} удален из менеджеров")
+        else:
+            await update.message.reply_text(f"❌ Пользователь @{username} не найден в менеджерах")
+    else:
+        await update.message.reply_text("❌ Укажите ID пользователя или @username")
 
-# ========== КОМАНДА ОБНОВЛЕНИЯ УВЕДОМЛЕНИЯ ==========
+async def list_exceptions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать список всех менеджеров"""
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    await managers_command(update, context)  # Используем существующую функцию
+
+async def clear_exceptions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Очистить все исключения"""
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    excluded_users_manager.clear_all()
+    await update.message.reply_text("✅ Все менеджеры удалены из исключений")
 
 async def update_notification_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда для ручного обновления уведомления"""
+    """Обновить единое уведомление"""
     if not update or not update.message:
         return
         
@@ -1929,13 +1904,8 @@ async def update_notification_command(update: Update, context: ContextTypes.DEFA
         await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
         return
     
-    await update.message.reply_text("🔄 Обновляю единое уведомление...")
-    success = await send_new_master_notification(context, force=True)
-    
-    if success:
-        await update.message.reply_text("✅ Единое уведомление обновлено")
-    else:
-        await update.message.reply_text("❌ Ошибка обновления уведомления")
+    await update.message.reply_text("🔄 Обновление уведомления...")
+    await send_new_master_notification(context, force=True)
 
 # ========== ОБРАБОТЧИКИ СООБЩЕНИЙ ==========
 
@@ -2047,6 +2017,8 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ========== ЗАПУСК БОТА ==========
 
 def main():
+    global application  # Делаем application глобальной
+    
     try:
         # Создаем папку assets при запуске
         ensure_assets_folder()
@@ -2057,6 +2029,12 @@ def main():
         print("=" * 50)
         
         application = Application.builder().token(BOT_TOKEN).build()
+        
+        # ДИНАМИЧЕСКИ ДОБАВЛЯЕМ ОБРАБОТЧИКИ ДЛЯ ВСЕХ СУЩЕСТВУЮЩИХ КОМАНД ПРИ ЗАПУСКЕ
+        custom_commands = custom_commands_manager.get_all_commands()
+        for command_name in custom_commands.keys():
+            application.add_handler(CommandHandler(command_name, handle_custom_command))
+            print(f"✅ Загружен обработчик для команды: /{command_name}")
         
         # Команды для управления кастомными командами
         application.add_handler(CommandHandler("create_command", create_command_command))
@@ -2114,12 +2092,6 @@ def main():
             filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL,
             handle_private_message, 
             block=False
-        ))
-        
-        # Универсальный обработчик кастомных команд (ДОЛЖЕН БЫТЬ ПОСЛЕДНИМ!)
-        application.add_handler(MessageHandler(
-            filters.TEXT & filters.COMMAND,
-            handle_custom_command
         ))
         
         # Обработчик ошибок

@@ -651,12 +651,23 @@ custom_commands_manager = CustomCommandsManager()
 
 def ensure_assets_folder():
     """Создает папку assets если она не существует"""
-    assets_path = os.path.join(os.path.dirname(__file__), 'assets')
+    # Используем абсолютный путь
+    assets_path = os.path.join(os.getcwd(), 'assets')
     if not os.path.exists(assets_path):
         os.makedirs(assets_path)
-        logger.info("✅ Папка assets создана")
+        logger.info(f"✅ Папка assets создана: {assets_path}")
     else:
-        logger.info("✅ Папка assets уже существует")
+        logger.info(f"✅ Папка assets уже существует: {assets_path}")
+    
+    # Проверим права на запись
+    test_file = os.path.join(assets_path, 'test.txt')
+    try:
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+        logger.info("✅ Права на запись в assets: OK")
+    except Exception as e:
+        logger.error(f"❌ Нет прав на запись в assets: {e}")
 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
@@ -693,8 +704,13 @@ def should_respond_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if update.edited_message:
         return False
         
+    # НЕ пропускаем команды, которые могут быть кастомными
     if update.message.text and update.message.text.startswith('/'):
-        return False
+        command_name = update.message.text.lstrip('/').split(' ')[0].lower()
+        # Проверяем, является ли это кастомной командой
+        if custom_commands_manager.get_command(command_name):
+            return False  # Это кастомная команда - пропускаем для обычной обработки
+        return False  # Это системная команда - не обрабатываем
         
     if update.message.text and len(update.message.text.strip()) < 1:
         return False
@@ -1050,14 +1066,21 @@ async def handle_file_for_command(update: Update, context: ContextTypes.DEFAULT_
     try:
         ensure_assets_folder()
         
+        # Получаем абсолютный путь к assets
+        assets_path = os.path.join(os.getcwd(), 'assets')
+        logger.info(f"📁 Работа с папкой: {assets_path}")
+        
         file_processed = False
+        file_name = ""
+        file_path = ""
         
         if content_type == 'photo' and update.message.photo:
             # Обрабатываем фото
             file_extension = '.jpg'
             file_name = f"cmd_{command_name}{file_extension}"
-            file_path = os.path.join('assets', file_name)
+            file_path = os.path.join(assets_path, file_name)
             
+            logger.info(f"📸 Скачивание фото в: {file_path}")
             photo_file = await update.message.photo[-1].get_file()
             await photo_file.download_to_drive(file_path)
             file_processed = True
@@ -1065,10 +1088,12 @@ async def handle_file_for_command(update: Update, context: ContextTypes.DEFAULT_
         elif content_type == 'document' and update.message.document:
             # Обрабатываем документ
             document = update.message.document
-            file_extension = os.path.splitext(document.file_name or 'file.bin')[1]
+            original_name = document.file_name or 'file.bin'
+            file_extension = os.path.splitext(original_name)[1]
             file_name = f"cmd_{command_name}{file_extension}"
-            file_path = os.path.join('assets', file_name)
+            file_path = os.path.join(assets_path, file_name)
             
+            logger.info(f"📄 Скачивание документа в: {file_path}")
             file = await document.get_file()
             await file.download_to_drive(file_path)
             file_processed = True
@@ -1078,8 +1103,9 @@ async def handle_file_for_command(update: Update, context: ContextTypes.DEFAULT_
             video = update.message.video
             file_extension = '.mp4'
             file_name = f"cmd_{command_name}{file_extension}"
-            file_path = os.path.join('assets', file_name)
+            file_path = os.path.join(assets_path, file_name)
             
+            logger.info(f"🎥 Скачивание видео в: {file_path}")
             file = await video.get_file()
             await file.download_to_drive(file_path)
             file_processed = True
@@ -1089,31 +1115,42 @@ async def handle_file_for_command(update: Update, context: ContextTypes.DEFAULT_
             audio = update.message.audio
             file_extension = '.mp3'
             file_name = f"cmd_{command_name}{file_extension}"
-            file_path = os.path.join('assets', file_name)
+            file_path = os.path.join(assets_path, file_name)
             
+            logger.info(f"🎵 Скачивание аудио в: {file_path}")
             file = await audio.get_file()
             await file.download_to_drive(file_path)
             file_processed = True
         
         if file_processed:
-            custom_commands_manager.add_command(command_name, content_type, file_name, description)
-            
-            type_emojis = {
-                'photo': '📸',
-                'document': '📄', 
-                'video': '🎥',
-                'audio': '🎵'
-            }
-            
-            await update.message.reply_text(
-                f"✅ **Команда создана!**\n\n"
-                f"🆕 `/{command_name}` - {description}\n"
-                f"{type_emojis.get(content_type, '📎')} Тип: команда с {content_type}\n"
-                f"💾 Файл: {file_name}\n\n"
-                f"Теперь пользователи могут использовать `/{command_name}`"
-            )
-            
-            logger.info(f"✅ Создана команда /{command_name} с файлом {file_name}")
+            # Проверяем, что файл действительно создан
+            if os.path.exists(file_path):
+                file_size = os.path.getsize(file_path)
+                logger.info(f"✅ Файл сохранен: {file_path} ({file_size} байт)")
+                
+                custom_commands_manager.add_command(command_name, content_type, file_name, description)
+                
+                type_emojis = {
+                    'photo': '📸',
+                    'document': '📄', 
+                    'video': '🎥',
+                    'audio': '🎵'
+                }
+                
+                await update.message.reply_text(
+                    f"✅ **Команда создана!**\n\n"
+                    f"🆕 `/{command_name}` - {description}\n"
+                    f"{type_emojis.get(content_type, '📎')} Тип: команда с {content_type}\n"
+                    f"💾 Файл: {file_name}\n"
+                    f"📏 Размер: {file_size} байт\n\n"
+                    f"Теперь пользователи могут использовать `/{command_name}`"
+                )
+                
+                logger.info(f"✅ Создана команда /{command_name} с файлом {file_name}")
+            else:
+                await update.message.reply_text("❌ Файл не был сохранен на диск")
+                logger.error(f"❌ Файл не создан: {file_path}")
+                return
         else:
             await update.message.reply_text(
                 "❌ Неверный тип файла. Пожалуйста, отправьте соответствующий файл."
@@ -1125,8 +1162,10 @@ async def handle_file_for_command(update: Update, context: ContextTypes.DEFAULT_
             del context.user_data['creating_command']
         
     except Exception as e:
-        await update.message.reply_text("❌ Ошибка при создании команды")
+        await update.message.reply_text(f"❌ Ошибка при создании команды: {str(e)}")
         logger.error(f"❌ Ошибка создания команды: {e}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
 async def handle_text_for_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает текст для создания команды"""
@@ -1261,19 +1300,23 @@ async def list_commands_command(update: Update, context: ContextTypes.DEFAULT_TY
 async def handle_custom_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает ВСЕ кастомные команды"""
     if not update or not update.message:
+        logger.error("❌ handle_custom_command: нет update или message")
         return
     
     # Получаем название команды (без /)
     command_text = update.message.text
     command_name = command_text.lstrip('/').split(' ')[0].lower()
     
+    logger.info(f"🔍 Обработка команды: '{command_text}' -> извлечено имя: '{command_name}'")
+    
     # Ищем команду в кастомных командах
     command = custom_commands_manager.get_command(command_name)
     if not command:
         logger.error(f"❌ Команда не найдена в базе: /{command_name}")
+        logger.info(f"📋 Доступные команды: {list(custom_commands_manager.get_all_commands().keys())}")
         return
     
-    logger.info(f"🔄 Выполнение кастомной команды: /{command_name}")
+    logger.info(f"🔄 Выполнение кастомной команды: /{command_name} (тип: {command['type']})")
     
     try:
         if command['type'] == 'text':
@@ -1284,7 +1327,9 @@ async def handle_custom_command(update: Update, context: ContextTypes.DEFAULT_TY
         
         elif command['type'] == 'photo':
             file_path = os.path.join('assets', command['content'])
+            logger.info(f"📁 Поиск файла: {file_path}")
             if os.path.exists(file_path):
+                logger.info(f"✅ Файл найден, отправка...")
                 with open(file_path, 'rb') as photo:
                     await update.message.reply_photo(
                         photo=photo,
@@ -1297,7 +1342,9 @@ async def handle_custom_command(update: Update, context: ContextTypes.DEFAULT_TY
         
         elif command['type'] == 'document':
             file_path = os.path.join('assets', command['content'])
+            logger.info(f"📁 Поиск файла: {file_path}")
             if os.path.exists(file_path):
+                logger.info(f"✅ Файл найден, отправка...")
                 with open(file_path, 'rb') as document:
                     await update.message.reply_document(
                         document=document,
@@ -1310,7 +1357,9 @@ async def handle_custom_command(update: Update, context: ContextTypes.DEFAULT_TY
         
         elif command['type'] == 'video':
             file_path = os.path.join('assets', command['content'])
+            logger.info(f"📁 Поиск файла: {file_path}")
             if os.path.exists(file_path):
+                logger.info(f"✅ Файл найден, отправка...")
                 with open(file_path, 'rb') as video:
                     await update.message.reply_video(
                         video=video,
@@ -1322,7 +1371,9 @@ async def handle_custom_command(update: Update, context: ContextTypes.DEFAULT_TY
         
         elif command['type'] == 'audio':
             file_path = os.path.join('assets', command['content'])
+            logger.info(f"📁 Поиск файла: {file_path}")
             if os.path.exists(file_path):
+                logger.info(f"✅ Файл найден, отправка...")
                 with open(file_path, 'rb') as audio:
                     await update.message.reply_audio(
                         audio=audio,
@@ -1337,6 +1388,39 @@ async def handle_custom_command(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         await update.message.reply_text("❌ Ошибка при выполнении команды")
         logger.error(f"❌ Ошибка выполнения команды /{command_name}: {e}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+
+async def check_files_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Проверить файлы в assets"""
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    assets_path = os.path.join(os.getcwd(), 'assets')
+    
+    if not os.path.exists(assets_path):
+        await update.message.reply_text("❌ Папка assets не существует!")
+        return
+    
+    files = os.listdir(assets_path)
+    
+    if not files:
+        await update.message.reply_text("📁 Папка assets пуста")
+        return
+    
+    text = "📁 **ФАЙЛЫ В ASSETS:**\n\n"
+    for i, file in enumerate(files, 1):
+        file_path = os.path.join(assets_path, file)
+        file_size = os.path.getsize(file_path)
+        text += f"{i}. `{file}` - {file_size} байт\n"
+    
+    text += f"\n📊 Всего файлов: {len(files)}"
+    
+    await update.message.reply_text(text, parse_mode='Markdown')
 
 # ========== КОМАНДЫ БОТА ==========
 
@@ -1357,7 +1441,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/create_command - создать команду\n"
         "/edit_command - редактировать команду\n"
         "/delete_command - удалить команду\n"
-        "/list_commands - список команд\n\n"
+        "/list_commands - список команд\n"
+        "/check_files - проверить файлы\n\n"
         "👥 **Управление исключениями:**\n"
         "/add_exception - добавить исключение\n"
         "/remove_exception - удалить исключение\n"
@@ -1390,6 +1475,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /edit_command - редактировать команду
 /delete_command - удалить команду  
 /list_commands - список всех команд
+/check_files - проверить файлы в assets
 
 **Рабочий чат:**
 /set_work_chat - установить этот чат как рабочий (для уведомлений)
@@ -1464,6 +1550,11 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cmd_type = cmd['type']
         command_stats[cmd_type] = command_stats.get(cmd_type, 0) + 1
     
+    # Проверяем папку assets
+    assets_path = os.path.join(os.getcwd(), 'assets')
+    assets_exists = os.path.exists(assets_path)
+    assets_files = len(os.listdir(assets_path)) if assets_exists else 0
+    
     status_text = f"""
 📊 **СТАТУС СИСТЕМЫ**
 
@@ -1481,6 +1572,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📄 Документы: {command_stats.get('document', 0)}
 🎥 Видео: {command_stats.get('video', 0)}
 🎵 Аудио: {command_stats.get('audio', 0)}
+📁 **Папка assets:** {'✅ Существует' if assets_exists else '❌ Не существует'}
+📄 **Файлов в assets:** {assets_files}
 
 ⚙️ **НАСТРОЙКИ ВОРОНОК:**
 🟡 Воронка 1: {FUNNELS[1]} мин ({minutes_to_hours_text(FUNNELS[1])}) - {funnel_1_count} чатов
@@ -2020,7 +2113,39 @@ def main():
     global application  # Делаем application глобальной
     
     try:
-        # Создаем папку assets при запуске
+        # Временная диагностика
+        print("=" * 50)
+        print("🔍 ДИАГНОСТИКА ФАЙЛОВОЙ СИСТЕМЫ")
+        print("=" * 50)
+
+        current_dir = os.getcwd()
+        print(f"📁 Текущая директория: {current_dir}")
+        print(f"📁 Содержимое: {os.listdir(current_dir)}")
+
+        assets_path = os.path.join(current_dir, 'assets')
+        print(f"📁 Путь к assets: {assets_path}")
+        print(f"📁 Существует: {os.path.exists(assets_path)}")
+
+        if os.path.exists(assets_path):
+            print(f"📁 Содержимое assets: {os.listdir(assets_path)}")
+            
+            # Проверка прав
+            test_file = os.path.join(assets_path, 'test_write.txt')
+            try:
+                with open(test_file, 'w') as f:
+                    f.write('test')
+                print("✅ Права на запись: OK")
+                os.remove(test_file)
+            except Exception as e:
+                print(f"❌ Права на запись: {e}")
+        else:
+            print("❌ Папка assets не существует, создаем...")
+            os.makedirs(assets_path)
+            print("✅ Папка assets создана")
+
+        print("=" * 50)
+        
+        # Создаем папку assets если она не существует
         ensure_assets_folder()
         
         print("=" * 50)
@@ -2030,11 +2155,17 @@ def main():
         
         application = Application.builder().token(BOT_TOKEN).build()
         
-        # ДИНАМИЧЕСКИ ДОБАВЛЯЕМ ОБРАБОТЧИКИ ДЛЯ ВСЕХ СУЩЕСТВУЮЩИХ КОМАНД ПРИ ЗАПУСКЕ
+        # СНАЧАЛА регистрируем обработчики кастомных команд (они должны быть ВЫШЕ других обработчиков)
         custom_commands = custom_commands_manager.get_all_commands()
         for command_name in custom_commands.keys():
             application.add_handler(CommandHandler(command_name, handle_custom_command))
             print(f"✅ Загружен обработчик для команды: /{command_name}")
+        
+        # ОСНОВНЫЕ КОМАНДЫ БОТА (должны быть после кастомных)
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(CommandHandler("status", status_command))
+        application.add_handler(CommandHandler("check_files", check_files_command))
         
         # Команды для управления кастомными командами
         application.add_handler(CommandHandler("create_command", create_command_command))
@@ -2074,10 +2205,7 @@ def main():
         application.add_handler(CommandHandler("clear_all", clear_all_command))
         application.add_handler(CommandHandler("pending", pending_command))
         
-        # Основные команды
-        application.add_handler(CommandHandler("start", start_command))
-        application.add_handler(CommandHandler("help", help_command))
-        application.add_handler(CommandHandler("status", status_command))
+        # Другие основные команды
         application.add_handler(CommandHandler("set_work_chat", set_work_chat_command))
         application.add_handler(CommandHandler("managers", managers_command))
         application.add_handler(CommandHandler("stats", stats_command))
@@ -2142,6 +2270,8 @@ def main():
     except Exception as e:
         print(f"💥 КРИТИЧЕСКАЯ ОШИБКА: {e}")
         logger.error(f"💥 Критическая ошибка при запуске бота: {e}")
+        import traceback
+        logger.error(f"💥 Traceback: {traceback.format_exc()}")
 
 if __name__ == "__main__":
     main()

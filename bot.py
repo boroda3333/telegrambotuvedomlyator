@@ -926,9 +926,12 @@ async def handle_manager_reply(update: Update, context: ContextTypes.DEFAULT_TYP
     if not is_manager(update.message.from_user.id, username):
         return
         
+    # ЕСЛИ ЭТО КОМАНДА - НЕ ОБРАБАТЫВАЕМ ЗДЕСЬ, ОНА ОБРАБОТАЕТСЯ CommandHandler
     if update.message.text and update.message.text.startswith('/'):
+        logger.info(f"🔍 Команда от менеджера {update.message.from_user.id}, передаем CommandHandler")
         return
     
+    # Обрабатываем только обычные сообщения (не команды)
     chat_id = update.message.chat.id
     logger.info(f"🔍 Менеджер ответил в чате {chat_id}")
     
@@ -1716,8 +1719,19 @@ async def set_work_chat_command(update: Update, context: ContextTypes.DEFAULT_TY
         return
     
     chat_id = update.message.chat.id
+    chat_title = update.message.chat.title or "Личные сообщения"
+    
     if work_chat_manager.save_work_chat(chat_id):
-        await update.message.reply_text(f"✅ Этот чат установлен как рабочий для уведомлений (ID: {chat_id})")
+        await update.message.reply_text(
+            f"✅ **Этот чат установлен как рабочий для уведомлений!**\n\n"
+            f"📝 Название: {chat_title}\n"
+            f"🆔 ID: {chat_id}\n\n"
+            f"Теперь все уведомления о непрочитанных сообщениях будут приходить сюда."
+        )
+        logger.info(f"✅ Рабочий чат установлен: {chat_title} (ID: {chat_id})")
+        
+        # Немедленно отправляем тестовое уведомление
+        await send_new_master_notification(context, force=True)
     else:
         await update.message.reply_text("❌ Ошибка при установке рабочего чата")
 
@@ -1999,18 +2013,25 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if not update or not update.message:
         return
         
-    logger.info(f"📨 Получено групповое сообщение: {update.message.chat.title} - {update.message.text[:50] if update.message.text else '[без текста]'}...")
+    chat_title = update.message.chat.title or "Без названия"
+    logger.info(f"📨 Получено групповое сообщение: {chat_title} - {update.message.text[:50] if update.message.text else '[без текста]'}...")
     
     # Игнорируем сообщения от самого бота
     if update.message.from_user.id == context.bot.id:
         return
         
-    # Игнорируем менеджеров
+    # Игнорируем менеджеров (но команды менеджеров будут обработаны CommandHandler)
     username = update.message.from_user.username
     if is_manager(update.message.from_user.id, username):
-        logger.info(f"🔍 Сообщение от менеджера {update.message.from_user.id}, пропускаем")
-        await handle_manager_reply(update, context)
-        return
+        # Если это команда - пропускаем для CommandHandler
+        if update.message.text and update.message.text.startswith('/'):
+            logger.info(f"🔍 Команда от менеджера {update.message.from_user.id}, передаем CommandHandler")
+            return
+        # Если обычное сообщение - обрабатываем как ответ менеджера
+        else:
+            logger.info(f"🔍 Обычное сообщение от менеджера {update.message.from_user.id}, обрабатываем")
+            await handle_manager_reply(update, context)
+            return
         
     # Игнорируем служебные сообщения
     if (update.message.new_chat_members or 
@@ -2050,7 +2071,6 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         if flags_manager.has_replied(replied_key):
             flags_manager.clear_replied(replied_key)
         
-        chat_title = update.message.chat.title
         username = update.message.from_user.username
         first_name = update.message.from_user.first_name
         message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
@@ -2254,6 +2274,7 @@ def main():
         
         # Команды для обновления уведомления
         application.add_handler(CommandHandler("update_notification", update_notification_command))
+        application.add_handler(CommandHandler("test_notification", test_notification_command))
         
         # Команды для управления исключениями
         application.add_handler(CommandHandler("add_exception", add_exception_command))
@@ -2324,3 +2345,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

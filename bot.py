@@ -26,6 +26,11 @@ AUTO_REPLY_MESSAGE = """Здравствуйте, вы написали в не�
 
 Мы отвечаем с понедельника по пятницу | c 10:00 до 19:00 по МСК
 
+🤖 **Автоматические команды:**
+🏷️ `/price` - Прайс-лист
+📋 `/reglament` - Регламент
+❓ `/help_client` - Справка по командам
+
 **сообщение автоматическое, отвечать на него не нужно**"""
 
 # ID администраторов
@@ -691,42 +696,14 @@ def is_working_hours():
     now = datetime.now(MOSCOW_TZ)
     current_time = now.time()
     # Проверяем рабочие дни (пн-пт) и время (10:00-19:00)
-    if now.weekday() < 5:  # 0-4 = понедельник-пятница
-        if current_time >= time(10, 0) and current_time <= time(19, 0):
-            return True
-    return False
-
-def should_respond_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Определяет, нужно ли отправлять автоответ на сообщение"""
-    if not update or not update.message:
-        return False
+    is_working_day = now.weekday() < 5  # 0-4 = понедельник-пятница
+    is_working_time = current_time >= time(10, 0) and current_time <= time(19, 0)
     
-    # Игнорируем сообщения от самого бота
-    if update.message.from_user.id == context.bot.id:
-        return False
-        
-    # Игнорируем менеджеров
-    username = update.message.from_user.username
-    if is_manager(update.message.from_user.id, username):
-        return False
-        
-    # Игнорируем служебные сообщения
-    if (update.message.new_chat_members or 
-        update.message.left_chat_member or 
-        update.message.pinned_message or
-        update.edited_message):
-        return False
-        
-    # Игнорируем команды (они обрабатываются отдельно)
-    if update.message.text and update.message.text.startswith('/'):
-        return False
-        
-    # Игнорируем пустые сообщения
-    if update.message.text and len(update.message.text.strip()) < 1:
-        return False
-        
-    # Все остальные сообщения обрабатываем
-    return True
+    result = is_working_day and is_working_time
+    
+    logger.info(f"🕐 Проверка рабочего времени: день недели {now.weekday()}, время {current_time.strftime('%H:%M')}, результат: {'РАБОЧЕЕ' if result else 'НЕРАБОЧЕЕ'}")
+    
+    return result
 
 def get_chat_display_name(chat_data: Dict[str, Any]) -> str:
     chat_title = chat_data.get('chat_title')
@@ -2031,6 +2008,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     # Игнорируем менеджеров
     username = update.message.from_user.username
     if is_manager(update.message.from_user.id, username):
+        logger.info(f"🔍 Сообщение от менеджера {update.message.from_user.id}, пропускаем")
         await handle_manager_reply(update, context)
         return
         
@@ -2039,26 +2017,33 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         update.message.left_chat_member or 
         update.message.pinned_message or
         update.edited_message):
+        logger.info("🔍 Служебное сообщение, пропускаем")
         return
         
     # Игнорируем команды (они обрабатываются отдельно CommandHandler)
     if update.message.text and update.message.text.startswith('/'):
-        logger.info(f"🔍 Пропускаем команду: {update.message.text}")
+        logger.info(f"🔍 Команда {update.message.text}, пропускаем для CommandHandler")
         return
         
     # Игнорируем пустые сообщения
     if update.message.text and len(update.message.text.strip()) < 1:
+        logger.info("🔍 Пустое сообщение, пропускаем")
         return
 
+    logger.info(f"🔍 Обычное сообщение от клиента, обрабатываем...")
+    
     # Обрабатываем обычные сообщения от клиентов
     chat_id = update.message.chat.id
     if not is_working_hours():
         # Нерабочее время - отправляем автоответ
         replied_key = f'chat_{chat_id}'
         if not flags_manager.has_replied(replied_key):
+            logger.info(f"🕐 Нерабочее время, отправляем автоответ в чат {chat_id}")
             await update.message.reply_text(AUTO_REPLY_MESSAGE)
             flags_manager.set_replied(replied_key)
             logger.info(f"✅ Автоответ отправлен в чат {chat_id} (нерабочее время)")
+        else:
+            logger.info(f"🕐 Автоответ уже был отправлен в этот чат ранее")
     else:
         # Рабочее время - добавляем в непрочитанные
         replied_key = f'chat_{chat_id}'
@@ -2069,6 +2054,8 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         username = update.message.from_user.username
         first_name = update.message.from_user.first_name
         message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
+        
+        logger.info(f"🕐 Рабочее время, добавляем в непрочитанные: {message_text[:50]}...")
         
         pending_messages_manager.add_message(
             chat_id=update.message.chat.id,
@@ -2098,6 +2085,7 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
     # Игнорируем менеджеров
     username = update.message.from_user.username
     if is_manager(update.message.from_user.id, username):
+        logger.info(f"🔍 Сообщение от менеджера {update.message.from_user.id}, пропускаем")
         await handle_manager_reply(update, context)
         return
         
@@ -2106,26 +2094,33 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         update.message.left_chat_member or 
         update.message.pinned_message or
         update.edited_message):
+        logger.info("🔍 Служебное сообщение, пропускаем")
         return
         
     # Игнорируем команды (они обрабатываются отдельно CommandHandler)
     if update.message.text and update.message.text.startswith('/'):
-        logger.info(f"🔍 Пропускаем команду: {update.message.text}")
+        logger.info(f"🔍 Команда {update.message.text}, пропускаем для CommandHandler")
         return
         
     # Игнорируем пустые сообщения
     if update.message.text and len(update.message.text.strip()) < 1:
+        logger.info("🔍 Пустое сообщение, пропускаем")
         return
 
+    logger.info(f"🔍 Обычное сообщение от клиента, обрабатываем...")
+    
     # Обрабатываем обычные сообщения от клиентов
     user_id = update.message.from_user.id
     if not is_working_hours():
         # Нерабочее время - отправляем автоответ
         replied_key = f'user_{user_id}'
         if not flags_manager.has_replied(replied_key):
+            logger.info(f"🕐 Нерабочее время, отправляем автоответ пользователю {user_id}")
             await update.message.reply_text(AUTO_REPLY_MESSAGE)
             flags_manager.set_replied(replied_key)
             logger.info(f"✅ Автоответ отправлен пользователю {user_id} (нерабочее время)")
+        else:
+            logger.info(f"🕐 Автоответ уже был отправлен этому пользователю ранее")
     else:
         # Рабочее время - добавляем в непрочитанные
         replied_key = f'user_{user_id}'
@@ -2135,6 +2130,8 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         username = update.message.from_user.username
         first_name = update.message.from_user.first_name
         message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
+        
+        logger.info(f"🕐 Рабочее время, добавляем в непрочитанные: {message_text[:50]}...")
         
         pending_messages_manager.add_message(
             chat_id=update.message.chat.id,
@@ -2209,10 +2206,23 @@ def main():
         
         application = Application.builder().token(BOT_TOKEN).build()
         
-        # РЕГИСТРИРУЕМ ВСЕ КАСТОМНЫЕ КОМАНДЫ ПРИ ЗАПУСКЕ
+        # СНАЧАЛА регистрируем обработчики сообщений (они должны быть ПЕРВЫМИ)
+        print("📝 Регистрируем обработчики сообщений...")
+        application.add_handler(MessageHandler(
+            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL, 
+            handle_group_message
+        ))
+        application.add_handler(MessageHandler(
+            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL,
+            handle_private_message
+        ))
+        
+        # ПОТОМ регистрируем ВСЕ кастомные команды
+        print("📝 Регистрируем кастомные команды...")
         custom_commands_manager.register_all_handlers()
         
-        # ОСНОВНЫЕ КОМАНДЫ БОТА
+        # ЗАТЕМ основные команды бота
+        print("📝 Регистрируем основные команды бота...")
         application.add_handler(CommandHandler("start", start_command))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("status", status_command))
@@ -2260,16 +2270,6 @@ def main():
         application.add_handler(CommandHandler("set_work_chat", set_work_chat_command))
         application.add_handler(CommandHandler("managers", managers_command))
         application.add_handler(CommandHandler("stats", stats_command))
-        
-        # Обработчики сообщений (должны быть ПОСЛЕ CommandHandler)
-        application.add_handler(MessageHandler(
-            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL, 
-            handle_group_message
-        ))
-        application.add_handler(MessageHandler(
-            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL,
-            handle_private_message
-        ))
         
         # Обработчик ошибок
         application.add_error_handler(error_handler)
@@ -2324,4 +2324,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

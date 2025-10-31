@@ -10,7 +10,7 @@ from typing import Dict, Any, List
 
 # Настройка логирования
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ class CustomCommandsManager:
             logger.error(f"Ошибка сохранения кастомных команд: {e}")
     
     def add_command(self, command_name: str, content_type: str, content: str, description: str = ""):
-        """Добавляет новую команду и сразу регистрирует обработчик"""
+        """Добавляет новую команду"""
         self.commands[command_name] = {
             'type': content_type,
             'content': content,
@@ -82,35 +82,7 @@ class CustomCommandsManager:
             'created_at': datetime.now(MOSCOW_TZ).isoformat()
         }
         self.save_commands()
-        
-        # ДИНАМИЧЕСКАЯ РЕГИСТРАЦИЯ ОБРАБОТЧИКА
-        global application
-        if application:
-            self.register_command_handler(command_name)
-            logger.info(f"✅ Динамически зарегистрирован обработчик для: /{command_name}")
-    
-    def register_command_handler(self, command_name: str):
-        """Регистрирует обработчик для конкретной команды"""
-        global application
-        if application:
-            # Удаляем старый обработчик если есть
-            for handler in application.handlers[0]:
-                if (isinstance(handler, CommandHandler) and 
-                    handler.commands and 
-                    command_name in handler.commands):
-                    application.handlers[0].remove(handler)
-                    break
-            
-            # Добавляем новый обработчик
-            application.add_handler(CommandHandler(command_name, self.handle_custom_command))
-    
-    def register_all_handlers(self):
-        """Регистрирует обработчики для всех команд при запуске"""
-        global application
-        if application:
-            for command_name in self.commands.keys():
-                self.register_command_handler(command_name)
-            logger.info(f"✅ Зарегистрировано обработчиков для {len(self.commands)} кастомных команд")
+        logger.info(f"✅ Команда добавлена: /{command_name} (тип: {content_type})")
     
     def remove_command(self, command_name: str) -> bool:
         """Удаляет команду и её обработчик"""
@@ -125,17 +97,6 @@ class CustomCommandsManager:
                         logger.info(f"✅ Удален файл: {file_path}")
                     except Exception as e:
                         logger.error(f"❌ Ошибка удаления файла {file_path}: {e}")
-            
-            # УДАЛЯЕМ ОБРАБОТЧИК ИЗ ПРИЛОЖЕНИЯ
-            global application
-            if application:
-                for handler in application.handlers[0]:
-                    if (isinstance(handler, CommandHandler) and 
-                        handler.commands and 
-                        command_name in handler.commands):
-                        application.handlers[0].remove(handler)
-                        logger.info(f"✅ Удален обработчик для: /{command_name}")
-                        break
             
             del self.commands[command_name]
             self.save_commands()
@@ -171,7 +132,7 @@ class CustomCommandsManager:
         command = self.get_command(command_name)
         if not command:
             logger.error(f"❌ Команда '{command_name}' не найдена в базе")
-            logger.info(f"📋 Доступные команды: {all_commands}")
+            await update.message.reply_text(f"❌ Команда `/{command_name}` не найдена")
             return
         
         logger.info(f"🔄 Выполнение кастомной команды: /{command_name} (тип: {command['type']})")
@@ -185,61 +146,61 @@ class CustomCommandsManager:
             
             elif command['type'] == 'photo':
                 file_path = os.path.join('assets', command['content'])
-                logger.info(f"📁 Поиск файла: {file_path}")
+                logger.info(f"📁 Поиск файла фото: {file_path}")
+                
                 if os.path.exists(file_path):
-                    logger.info(f"✅ Файл найден, отправка...")
-                    with open(file_path, 'rb') as photo:
-                        await update.message.reply_photo(
-                            photo=photo,
-                            caption=command.get('description', ''),
-                            parse_mode='Markdown'
-                        )
+                    logger.info(f"✅ Файл найден, отправка фото...")
+                    await update.message.reply_photo(
+                        photo=open(file_path, 'rb'),
+                        caption=command.get('description', ''),
+                        parse_mode='Markdown'
+                    )
                 else:
-                    await update.message.reply_text("❌ Файл не найден")
+                    await update.message.reply_text("❌ Файл изображения не найден")
                     logger.error(f"❌ Файл не найден: {file_path}")
             
             elif command['type'] == 'document':
                 file_path = os.path.join('assets', command['content'])
-                logger.info(f"📁 Поиск файла: {file_path}")
+                logger.info(f"📁 Поиск файла документа: {file_path}")
+                
                 if os.path.exists(file_path):
-                    logger.info(f"✅ Файл найден, отправка...")
-                    with open(file_path, 'rb') as document:
-                        await update.message.reply_document(
-                            document=document,
-                            filename=command['content'],
-                            caption=command.get('description', ''),
-                            parse_mode='Markdown'
-                        )
+                    logger.info(f"✅ Файл найден, отправка документа...")
+                    await update.message.reply_document(
+                        document=open(file_path, 'rb'),
+                        filename=command['content'],
+                        caption=command.get('description', ''),
+                        parse_mode='Markdown'
+                    )
                 else:
-                    await update.message.reply_text("❌ Файл не найден")
+                    await update.message.reply_text("❌ Файл документа не найден")
             
             elif command['type'] == 'video':
                 file_path = os.path.join('assets', command['content'])
-                logger.info(f"📁 Поиск файла: {file_path}")
+                logger.info(f"📁 Поиск файла видео: {file_path}")
+                
                 if os.path.exists(file_path):
-                    logger.info(f"✅ Файл найден, отправка...")
-                    with open(file_path, 'rb') as video:
-                        await update.message.reply_video(
-                            video=video,
-                            caption=command.get('description', ''),
-                            parse_mode='Markdown'
-                        )
+                    logger.info(f"✅ Файл найден, отправка видео...")
+                    await update.message.reply_video(
+                        video=open(file_path, 'rb'),
+                        caption=command.get('description', ''),
+                        parse_mode='Markdown'
+                    )
                 else:
-                    await update.message.reply_text("❌ Файл не найден")
+                    await update.message.reply_text("❌ Файл видео не найден")
             
             elif command['type'] == 'audio':
                 file_path = os.path.join('assets', command['content'])
-                logger.info(f"📁 Поиск файла: {file_path}")
+                logger.info(f"📁 Поиск файла аудио: {file_path}")
+                
                 if os.path.exists(file_path):
-                    logger.info(f"✅ Файл найден, отправка...")
-                    with open(file_path, 'rb') as audio:
-                        await update.message.reply_audio(
-                            audio=audio,
-                            caption=command.get('description', ''),
-                            parse_mode='Markdown'
-                        )
+                    logger.info(f"✅ Файл найден, отправка аудио...")
+                    await update.message.reply_audio(
+                        audio=open(file_path, 'rb'),
+                        caption=command.get('description', ''),
+                        parse_mode='Markdown'
+                    )
                 else:
-                    await update.message.reply_text("❌ Файл не найден")
+                    await update.message.reply_text("❌ Файл аудио не найден")
             
             logger.info(f"✅ Кастомная команда выполнена: /{command_name}")
             
@@ -485,7 +446,7 @@ class FunnelsConfig:
         }
     
     def save_funnels(self):
-        """Сохраняет конфигурацию воронок в файл"""
+        """Совраняет конфигурацию воронок в файл"""
         try:
             with open(FUNNELS_CONFIG_FILE, 'w') as f:
                 json.dump(self.funnels, f, indent=2)
@@ -763,7 +724,6 @@ custom_commands_manager = CustomCommandsManager()
 
 def ensure_assets_folder():
     """Создает папку assets если она не существует"""
-    # Используем абсолютный путь
     assets_path = os.path.join(os.getcwd(), 'assets')
     if not os.path.exists(assets_path):
         os.makedirs(assets_path)
@@ -771,15 +731,17 @@ def ensure_assets_folder():
     else:
         logger.info(f"✅ Папка assets уже существует: {assets_path}")
     
-    # Проверим права на запись
+    # Проверяем права на запись
     test_file = os.path.join(assets_path, 'test.txt')
     try:
         with open(test_file, 'w') as f:
             f.write('test')
         os.remove(test_file)
         logger.info("✅ Права на запись в assets: OK")
+        return True
     except Exception as e:
         logger.error(f"❌ Нет прав на запись в assets: {e}")
+        return False
 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
@@ -1236,6 +1198,9 @@ async def handle_file_for_command(update: Update, context: ContextTypes.DEFAULT_
                 )
                 
                 logger.info(f"✅ Создана команда /{command_name} с файлом {file_name}")
+                
+                # Перезагружаем обработчики команд
+                await register_custom_commands_handlers(application)
             else:
                 await update.message.reply_text("❌ Файл не был сохранен на диск")
                 logger.error(f"❌ Файл не создан: {file_path}")
@@ -1286,6 +1251,9 @@ async def handle_text_for_command(update: Update, context: ContextTypes.DEFAULT_
         )
         
         logger.info(f"✅ Создана текстовая команда /{command_name}")
+        
+        # Перезагружаем обработчики команд
+        await register_custom_commands_handlers(application)
         
         # Очищаем временные данные
         if 'creating_command' in context.user_data:
@@ -1348,6 +1316,8 @@ async def delete_command_command(update: Update, context: ContextTypes.DEFAULT_T
     
     if custom_commands_manager.remove_command(command_name):
         await update.message.reply_text(f"✅ Команда `/{command_name}` удалена")
+        # Перезагружаем обработчики команд
+        await register_custom_commands_handlers(application)
     else:
         await update.message.reply_text(f"❌ Команда `/{command_name}` не найдена")
 
@@ -1416,6 +1386,29 @@ async def check_files_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     text += f"\n📊 Всего файлов: {len(files)}"
     
     await update.message.reply_text(text, parse_mode='Markdown')
+
+async def register_custom_commands_handlers(app):
+    """Регистрирует обработчики для всех кастомных команд"""
+    if not app:
+        return
+    
+    # Удаляем старые обработчики кастомных команд
+    handlers_to_remove = []
+    for handler in app.handlers[0]:
+        if (isinstance(handler, CommandHandler) and 
+            handler.callback == custom_commands_manager.handle_custom_command):
+            handlers_to_remove.append(handler)
+    
+    for handler in handlers_to_remove:
+        app.handlers[0].remove(handler)
+    
+    # Регистрируем новые обработчики для всех кастомных команд
+    custom_commands = custom_commands_manager.get_all_commands()
+    for command_name in custom_commands.keys():
+        app.add_handler(CommandHandler(command_name, custom_commands_manager.handle_custom_command))
+        logger.info(f"✅ Зарегистрирован обработчик для: /{command_name}")
+    
+    logger.info(f"🔄 Перезарегистрировано {len(custom_commands)} кастомных команд")
 
 # ========== КОМАНДЫ БОТА ==========
 
@@ -2264,41 +2257,9 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ========== ЗАПУСК БОТА ==========
 
 def main():
-    global application  # Делаем application глобальной
+    global application
     
     try:
-        # Временная диагностика
-        print("=" * 50)
-        print("🔍 ДИАГНОСТИКА ФАЙЛОВОЙ СИСТЕМЫ")
-        print("=" * 50)
-
-        current_dir = os.getcwd()
-        print(f"📁 Текущая директория: {current_dir}")
-        print(f"📁 Содержимое: {os.listdir(current_dir)}")
-
-        assets_path = os.path.join(current_dir, 'assets')
-        print(f"📁 Путь к assets: {assets_path}")
-        print(f"📁 Существует: {os.path.exists(assets_path)}")
-
-        if os.path.exists(assets_path):
-            print(f"📁 Содержимое assets: {os.listdir(assets_path)}")
-            
-            # Проверка прав
-            test_file = os.path.join(assets_path, 'test_write.txt')
-            try:
-                with open(test_file, 'w') as f:
-                    f.write('test')
-                print("✅ Права на запись: OK")
-                os.remove(test_file)
-            except Exception as e:
-                print(f"❌ Права на запись: {e}")
-        else:
-            print("❌ Папка assets не существует, создаем...")
-            os.makedirs(assets_path)
-            print("✅ Папка assets создана")
-
-        print("=" * 50)
-        
         # Создаем папку assets если она не существует
         ensure_assets_folder()
         
@@ -2352,22 +2313,23 @@ def main():
         application.add_handler(CommandHandler("managers", managers_command))
         application.add_handler(CommandHandler("stats", stats_command))
         
-        # ЗАТЕМ регистрируем ВСЕ кастомные команды (они должны быть ПОСЛЕ основных команд)
-        print("📝 Регистрируем кастомные команды...")
-        custom_commands_manager.register_all_handlers()
+        # ВАЖНО: Регистрируем ОДИН обработчик для ВСЕХ кастомных команд
+        print("📝 Регистрируем обработчик для кастомных команд...")
+        
+        # Создаем фильтр для всех кастомных команд
+        custom_commands_list = list(custom_commands_manager.get_all_commands().keys())
+        if custom_commands_list:
+            logger.info(f"📋 Регистрируем {len(custom_commands_list)} кастомных команд: {custom_commands_list}")
+            
+            # Регистрируем отдельный обработчик для каждой кастомной команды
+            for command_name in custom_commands_list:
+                application.add_handler(CommandHandler(command_name, custom_commands_manager.handle_custom_command))
+                logger.info(f"✅ Зарегистрирован обработчик для: /{command_name}")
         
         # В САМОМ КОНЦЕ обработчики сообщений (они должны быть ПОСЛЕДНИМИ)
         print("📝 Регистрируем обработчики сообщений...")
-        application.add_handler(MessageHandler(
-            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL, 
-            handle_group_message
-        ))
-        application.add_handler(MessageHandler(
-            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL,
-            handle_private_message
-        ))
         
-        # Обработчики для создания команд
+        # Обработчики для создания команд (должны быть перед общими обработчиками)
         application.add_handler(MessageHandler(
             filters.PHOTO | filters.Document.ALL | filters.VIDEO | filters.AUDIO,
             handle_file_for_command
@@ -2377,56 +2339,53 @@ def main():
             handle_text_for_command
         ))
         
+        # Общие обработчики сообщений
+        application.add_handler(MessageHandler(
+            filters.ChatType.GROUPS & (filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL), 
+            handle_group_message
+        ))
+        application.add_handler(MessageHandler(
+            filters.ChatType.PRIVATE & (filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL),
+            handle_private_message
+        ))
+        
         # Обработчик ошибок
         application.add_error_handler(error_handler)
         
-        # Периодическая проверка и отправка нового уведомления (каждые 15 минут)
+        # Периодическая проверка
         job_queue = application.job_queue
         if job_queue:
-            job_queue.run_repeating(check_and_send_new_notification, interval=900, first=10)  # 15 минут
-            print("✅ Планировщик задач запущен (удаление старого + отправка нового каждые 15 минут)")
-            print("🛡️  COOLDOWN АКТИВИРОВАН - защита от частых отправок")
-            print("🔧 ЛОГИКА ВОРОНОК: Без дублирования (1 чат = 1 воронка)")
-            print("🆕 СИСТЕМА КОМАНД: Создавайте любые команды!")
-        else:
-            print("❌ Планировщик задач недоступен")
+            job_queue.run_repeating(check_and_send_new_notification, interval=900, first=10)
+            print("✅ Планировщик задач запущен")
         
         # Запуск
-        FUNNELS = funnels_config.get_funnels()
-        excluded_users = excluded_users_manager.get_all_excluded()
-        total_excluded = len(excluded_users["user_ids"]) + len(excluded_users["usernames"])
-        custom_commands = custom_commands_manager.get_all_commands()
-        
         print("🚀 Бот запускается...")
-        print(f"📊 Загружено флагов: {flags_manager.count_flags()}")
-        print(f"📋 Непрочитанных сообщений: {len(pending_messages_manager.get_all_pending_messages())}")
-        print(f"👥 Менеджеров в системе: {total_excluded}")
-        print(f"🆕 Кастомных команд: {len(custom_commands)}")
-        print(f"⚙️ Воронки уведомлений: {FUNNELS}")
         
-        if work_chat_manager.is_work_chat_set():
-            print(f"💬 Рабочий чат установлен: {work_chat_manager.get_work_chat_id()}")
-        else:
-            print("⚠️ Рабочий чат не установлен! Используйте /set_work_chat")
+        # ДИАГНОСТИКА: проверяем кастомные команды
+        custom_commands = custom_commands_manager.get_all_commands()
+        print(f"🆕 Загружено кастомных команд: {len(custom_commands)}")
+        for cmd_name, cmd_data in custom_commands.items():
+            print(f"   - /{cmd_name}: {cmd_data['type']} -> {cmd_data['content']}")
+            
+            # Проверяем файлы для медиа-команд
+            if cmd_data['type'] in ['photo', 'document', 'video', 'audio']:
+                file_path = os.path.join('assets', cmd_data['content'])
+                exists = os.path.exists(file_path)
+                print(f"     📁 Файл: {file_path} -> {'✅ СУЩЕСТВУЕТ' if exists else '❌ ОТСУТСТВУЕТ'}")
         
-        print("🔄 Логика уведомлений: УДАЛЕНИЕ СТАРОГО + ОТПРАВКА НОВОГО каждые 15 минут")
-        print("⏳ COOLDOWN: 15 минут между отправками")
-        print("🔧 ЛОГИКА ВОРОНОК: без дублирования (1 чат = 1 воронка)")
-        print("🆕 КАСТОМНЫЕ КОМАНДЫ: текст, фото, документы, видео, аудио")
         print("⏰ Ожидание сообщений...")
         print("=" * 50)
         
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=False,
+            drop_pending_updates=True,
             close_loop=False
         )
         
     except Exception as e:
         print(f"💥 КРИТИЧЕСКАЯ ОШИБКА: {e}")
-        logger.error(f"💥 Критическая ошибка при запуске бота: {e}")
         import traceback
-        logger.error(f"💥 Traceback: {traceback.format_exc()}")
+        print(f"💥 Traceback: {traceback.format_exc()}")
 
 if __name__ == "__main__":
     main()

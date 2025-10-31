@@ -1495,7 +1495,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📝 **Логика работы воронок:**
 🟡 Воронка 1: через 1 час без ответа
-🟠 Воронка 2: через 3 часа без ответа
+🟠 Воронка 2: через 3 часа без ответa
 🔴 Воронка 3: через 5 часов без ответа
 **БЕЗ ДУБЛИРОВАНИЯ** - каждый чат показывается только в одной воронке
 
@@ -2006,6 +2006,22 @@ async def update_notification_command(update: Update, context: ContextTypes.DEFA
     await update.message.reply_text("🔄 Обновление уведомления...")
     await send_new_master_notification(context, force=True)
 
+async def test_notification_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Тестовая команда для отправки уведомления"""
+    if not update or not update.message:
+        return
+        
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ У вас нет прав для выполнения этой команды")
+        return
+    
+    await update.message.reply_text("🧪 Тестирование уведомления...")
+    success = await send_new_master_notification(context, force=True)
+    if success:
+        await update.message.reply_text("✅ Тестовое уведомление отправлено!")
+    else:
+        await update.message.reply_text("❌ Не удалось отправить тестовое уведомление")
+
 # ========== ОБРАБОТЧИКИ СООБЩЕНИЙ ==========
 
 async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2020,18 +2036,18 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if update.message.from_user.id == context.bot.id:
         return
         
-    # Игнорируем менеджеров (но команды менеджеров будут обработаны CommandHandler)
+    # Игнорируем менеджеров - их команды обрабатываются CommandHandler
     username = update.message.from_user.username
     if is_manager(update.message.from_user.id, username):
-        # Если это команда - пропускаем для CommandHandler
+        # ВСЕ команды менеджеров передаем CommandHandler
         if update.message.text and update.message.text.startswith('/'):
             logger.info(f"🔍 Команда от менеджера {update.message.from_user.id}, передаем CommandHandler")
-            return
+            return  # CommandHandler обработает эту команду
+        
         # Если обычное сообщение - обрабатываем как ответ менеджера
-        else:
-            logger.info(f"🔍 Обычное сообщение от менеджера {update.message.from_user.id}, обрабатываем")
-            await handle_manager_reply(update, context)
-            return
+        logger.info(f"🔍 Обычное сообщение от менеджера {update.message.from_user.id}, обрабатываем")
+        await handle_manager_reply(update, context)
+        return
         
     # Игнорируем служебные сообщения
     if (update.message.new_chat_members or 
@@ -2102,10 +2118,16 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
     if update.message.from_user.id == context.bot.id:
         return
         
-    # Игнорируем менеджеров
+    # Игнорируем менеджеров - их команды обрабатываются CommandHandler
     username = update.message.from_user.username
     if is_manager(update.message.from_user.id, username):
-        logger.info(f"🔍 Сообщение от менеджера {update.message.from_user.id}, пропускаем")
+        # ВСЕ команды менеджеров передаем CommandHandler
+        if update.message.text and update.message.text.startswith('/'):
+            logger.info(f"🔍 Команда от менеджера {update.message.from_user.id}, передаем CommandHandler")
+            return  # CommandHandler обработает эту команду
+        
+        # Если обычное сообщение - обрабатываем как ответ менеджера
+        logger.info(f"🔍 Обычное сообщение от менеджера {update.message.from_user.id}, обрабатываем")
         await handle_manager_reply(update, context)
         return
         
@@ -2345,4 +2367,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

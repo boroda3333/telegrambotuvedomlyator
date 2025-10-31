@@ -102,7 +102,7 @@ class CustomCommandsManager:
                     break
             
             # Добавляем новый обработчик
-            application.add_handler(CommandHandler(command_name, handle_custom_command))
+            application.add_handler(CommandHandler(command_name, self.handle_custom_command))
     
     def register_all_handlers(self):
         """Регистрирует обработчики для всех команд при запуске"""
@@ -150,6 +150,104 @@ class CustomCommandsManager:
     def get_all_commands(self) -> Dict[str, Any]:
         """Возвращает все команды"""
         return self.commands
+
+    async def handle_custom_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обрабатывает ВСЕ кастомные команды"""
+        if not update or not update.message:
+            logger.error("❌ handle_custom_command: нет update или message")
+            return
+        
+        # Получаем название команды (без /)
+        command_text = update.message.text
+        command_name = command_text.lstrip('/').split(' ')[0].lower()
+        
+        logger.info(f"🔍 Обработка кастомной команды: '{command_text}' -> извлечено имя: '{command_name}'")
+        
+        # Отладочная информация
+        all_commands = list(self.get_all_commands().keys())
+        logger.info(f"📋 Все доступные команды: {all_commands}")
+        
+        # Ищем команду в кастомных командах
+        command = self.get_command(command_name)
+        if not command:
+            logger.error(f"❌ Команда '{command_name}' не найдена в базе")
+            logger.info(f"📋 Доступные команды: {all_commands}")
+            return
+        
+        logger.info(f"🔄 Выполнение кастомной команды: /{command_name} (тип: {command['type']})")
+        
+        try:
+            if command['type'] == 'text':
+                await update.message.reply_text(
+                    command['content'],
+                    parse_mode='Markdown'
+                )
+            
+            elif command['type'] == 'photo':
+                file_path = os.path.join('assets', command['content'])
+                logger.info(f"📁 Поиск файла: {file_path}")
+                if os.path.exists(file_path):
+                    logger.info(f"✅ Файл найден, отправка...")
+                    with open(file_path, 'rb') as photo:
+                        await update.message.reply_photo(
+                            photo=photo,
+                            caption=command.get('description', ''),
+                            parse_mode='Markdown'
+                        )
+                else:
+                    await update.message.reply_text("❌ Файл не найден")
+                    logger.error(f"❌ Файл не найден: {file_path}")
+            
+            elif command['type'] == 'document':
+                file_path = os.path.join('assets', command['content'])
+                logger.info(f"📁 Поиск файла: {file_path}")
+                if os.path.exists(file_path):
+                    logger.info(f"✅ Файл найден, отправка...")
+                    with open(file_path, 'rb') as document:
+                        await update.message.reply_document(
+                            document=document,
+                            filename=command['content'],
+                            caption=command.get('description', ''),
+                            parse_mode='Markdown'
+                        )
+                else:
+                    await update.message.reply_text("❌ Файл не найден")
+            
+            elif command['type'] == 'video':
+                file_path = os.path.join('assets', command['content'])
+                logger.info(f"📁 Поиск файла: {file_path}")
+                if os.path.exists(file_path):
+                    logger.info(f"✅ Файл найден, отправка...")
+                    with open(file_path, 'rb') as video:
+                        await update.message.reply_video(
+                            video=video,
+                            caption=command.get('description', ''),
+                            parse_mode='Markdown'
+                        )
+                else:
+                    await update.message.reply_text("❌ Файл не найден")
+            
+            elif command['type'] == 'audio':
+                file_path = os.path.join('assets', command['content'])
+                logger.info(f"📁 Поиск файла: {file_path}")
+                if os.path.exists(file_path):
+                    logger.info(f"✅ Файл найден, отправка...")
+                    with open(file_path, 'rb') as audio:
+                        await update.message.reply_audio(
+                            audio=audio,
+                            caption=command.get('description', ''),
+                            parse_mode='Markdown'
+                        )
+                else:
+                    await update.message.reply_text("❌ Файл не найден")
+            
+            logger.info(f"✅ Кастомная команда выполнена: /{command_name}")
+            
+        except Exception as e:
+            await update.message.reply_text("❌ Ошибка при выполнении команды")
+            logger.error(f"❌ Ошибка выполнения команды /{command_name}: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
 # ========== КЛАСС ДЛЯ УПРАВЛЕНИЯ ГЛАВНЫМ УВЕДОМЛЕНИЕМ ==========
 
@@ -1288,104 +1386,6 @@ async def list_commands_command(update: Update, context: ContextTypes.DEFAULT_TY
     
     await update.message.reply_text(text, parse_mode='Markdown')
 
-async def handle_custom_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает ВСЕ кастомные команды"""
-    if not update or not update.message:
-        logger.error("❌ handle_custom_command: нет update или message")
-        return
-    
-    # Получаем название команды (без /)
-    command_text = update.message.text
-    command_name = command_text.lstrip('/').split(' ')[0].lower()
-    
-    logger.info(f"🔍 Обработка кастомной команды: '{command_text}' -> извлечено имя: '{command_name}'")
-    
-    # Отладочная информация
-    all_commands = list(custom_commands_manager.get_all_commands().keys())
-    logger.info(f"📋 Все доступные команды: {all_commands}")
-    
-    # Ищем команду в кастомных командах
-    command = custom_commands_manager.get_command(command_name)
-    if not command:
-        logger.error(f"❌ Команда '{command_name}' не найдена в базе")
-        logger.info(f"📋 Доступные команды: {all_commands}")
-        return
-    
-    logger.info(f"🔄 Выполнение кастомной команды: /{command_name} (тип: {command['type']})")
-    
-    try:
-        if command['type'] == 'text':
-            await update.message.reply_text(
-                command['content'],
-                parse_mode='Markdown'
-            )
-        
-        elif command['type'] == 'photo':
-            file_path = os.path.join('assets', command['content'])
-            logger.info(f"📁 Поиск файла: {file_path}")
-            if os.path.exists(file_path):
-                logger.info(f"✅ Файл найден, отправка...")
-                with open(file_path, 'rb') as photo:
-                    await update.message.reply_photo(
-                        photo=photo,
-                        caption=command.get('description', ''),
-                        parse_mode='Markdown'
-                    )
-            else:
-                await update.message.reply_text("❌ Файл не найден")
-                logger.error(f"❌ Файл не найден: {file_path}")
-        
-        elif command['type'] == 'document':
-            file_path = os.path.join('assets', command['content'])
-            logger.info(f"📁 Поиск файла: {file_path}")
-            if os.path.exists(file_path):
-                logger.info(f"✅ Файл найден, отправка...")
-                with open(file_path, 'rb') as document:
-                    await update.message.reply_document(
-                        document=document,
-                        filename=command['content'],
-                        caption=command.get('description', ''),
-                        parse_mode='Markdown'
-                    )
-            else:
-                await update.message.reply_text("❌ Файл не найден")
-        
-        elif command['type'] == 'video':
-            file_path = os.path.join('assets', command['content'])
-            logger.info(f"📁 Поиск файла: {file_path}")
-            if os.path.exists(file_path):
-                logger.info(f"✅ Файл найден, отправка...")
-                with open(file_path, 'rb') as video:
-                    await update.message.reply_video(
-                        video=video,
-                        caption=command.get('description', ''),
-                        parse_mode='Markdown'
-                    )
-            else:
-                await update.message.reply_text("❌ Файл не найден")
-        
-        elif command['type'] == 'audio':
-            file_path = os.path.join('assets', command['content'])
-            logger.info(f"📁 Поиск файла: {file_path}")
-            if os.path.exists(file_path):
-                logger.info(f"✅ Файл найден, отправка...")
-                with open(file_path, 'rb') as audio:
-                    await update.message.reply_audio(
-                        audio=audio,
-                        caption=command.get('description', ''),
-                        parse_mode='Markdown'
-                    )
-            else:
-                await update.message.reply_text("❌ Файл не найден")
-        
-        logger.info(f"✅ Кастомная команда выполнена: /{command_name}")
-        
-    except Exception as e:
-        await update.message.reply_text("❌ Ошибка при выполнении команды")
-        logger.error(f"❌ Ошибка выполнения команды /{command_name}: {e}")
-        import traceback
-        logger.error(f"❌ Traceback: {traceback.format_exc()}")
-
 async def check_files_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Проверить файлы в assets"""
     if not update or not update.message:
@@ -2352,11 +2352,11 @@ def main():
         application.add_handler(CommandHandler("managers", managers_command))
         application.add_handler(CommandHandler("stats", stats_command))
         
-        # ПОТОМ регистрируем ВСЕ кастомные команды
+        # ЗАТЕМ регистрируем ВСЕ кастомные команды (они должны быть ПОСЛЕ основных команд)
         print("📝 Регистрируем кастомные команды...")
         custom_commands_manager.register_all_handlers()
         
-        # ЗАТЕМ обработчики сообщений (они должны быть ПОСЛЕДНИМИ)
+        # В САМОМ КОНЦЕ обработчики сообщений (они должны быть ПОСЛЕДНИМИ)
         print("📝 Регистрируем обработчики сообщений...")
         application.add_handler(MessageHandler(
             filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL, 

@@ -695,8 +695,10 @@ def is_excluded_user(user_id: int) -> bool:
 def is_working_hours():
     now = datetime.now(MOSCOW_TZ)
     current_time = now.time()
-    if current_time >= time(10, 0) and current_time <= time(19, 0):
-        return True
+    # Проверяем рабочие дни (пн-пт) и время (10:00-19:00)
+    if now.weekday() < 5:  # 0-4 = понедельник-пятница
+        if current_time >= time(10, 0) and current_time <= time(19, 0):
+            return True
     return False
 
 def should_respond_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -720,9 +722,9 @@ def should_respond_to_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         update.edited_message):
         return False
         
-    # НЕ игнорируем команды - они должны обрабатываться отдельно
-    # if update.message.text and update.message.text.startswith('/'):
-    #     return False
+    # Игнорируем команды (они обрабатываются отдельно)
+    if update.message.text and update.message.text.startswith('/'):
+        return False
         
     # Игнорируем пустые сообщения
     if update.message.text and len(update.message.text.strip()) < 1:
@@ -2027,52 +2029,65 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         
     logger.info(f"📨 Получено групповое сообщение: {update.message.chat.title} - {update.message.text[:50] if update.message.text else '[без текста]'}...")
     
+    # Игнорируем сообщения от самого бота
+    if update.message.from_user.id == context.bot.id:
+        return
+        
+    # Игнорируем менеджеров
     username = update.message.from_user.username
     if is_manager(update.message.from_user.id, username):
         await handle_manager_reply(update, context)
         return
-    
-    # Если это команда - пропускаем, она обработается CommandHandler
+        
+    # Игнорируем служебные сообщения
+    if (update.message.new_chat_members or 
+        update.message.left_chat_member or 
+        update.message.pinned_message or
+        update.edited_message):
+        return
+        
+    # Игнорируем команды (они обрабатываются отдельно CommandHandler)
     if update.message.text and update.message.text.startswith('/'):
         logger.info(f"🔍 Пропускаем команду: {update.message.text}")
         return
-    
-    if not should_respond_to_message(update, context):
-        logger.info("❌ Сообщение не требует обработки")
+        
+    # Игнорируем пустые сообщения
+    if update.message.text and len(update.message.text.strip()) < 1:
         return
-    
-    if update.message.chat.type in ['group', 'supergroup']:
-        if not is_working_hours():
-            chat_id = update.message.chat.id
-            replied_key = f'chat_{chat_id}'
-            if not flags_manager.has_replied(replied_key):
-                await update.message.reply_text(AUTO_REPLY_MESSAGE)
-                flags_manager.set_replied(replied_key)
-                logger.info(f"✅ Автоответ отправлен в чат {chat_id}")
-        else:
-            chat_id = update.message.chat.id
-            replied_key = f'chat_{chat_id}'
-            if flags_manager.has_replied(replied_key):
-                flags_manager.clear_replied(replied_key)
-            
-            chat_title = update.message.chat.title
-            username = update.message.from_user.username
-            first_name = update.message.from_user.first_name
-            message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
-            
-            pending_messages_manager.add_message(
-                chat_id=update.message.chat.id,
-                user_id=update.message.from_user.id,
-                message_text=message_text,
-                message_id=update.message.message_id,
-                chat_title=chat_title,
-                username=username,
-                first_name=first_name
-            )
-            logger.info(f"✅ Добавлено в непрочитанные: чат '{chat_title}', пользователь {update.message.from_user.id}")
-            
-            # НЕ отправляем уведомление автоматически при новом сообщении - только по расписанию
-            logger.info("📝 Новое сообщение добавлено, уведомление будет отправлено по расписанию")
+
+    # Обрабатываем обычные сообщения от клиентов
+    chat_id = update.message.chat.id
+    if not is_working_hours():
+        # Нерабочее время - отправляем автоответ
+        replied_key = f'chat_{chat_id}'
+        if not flags_manager.has_replied(replied_key):
+            await update.message.reply_text(AUTO_REPLY_MESSAGE)
+            flags_manager.set_replied(replied_key)
+            logger.info(f"✅ Автоответ отправлен в чат {chat_id} (нерабочее время)")
+    else:
+        # Рабочее время - добавляем в непрочитанные
+        replied_key = f'chat_{chat_id}'
+        if flags_manager.has_replied(replied_key):
+            flags_manager.clear_replied(replied_key)
+        
+        chat_title = update.message.chat.title
+        username = update.message.from_user.username
+        first_name = update.message.from_user.first_name
+        message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
+        
+        pending_messages_manager.add_message(
+            chat_id=update.message.chat.id,
+            user_id=update.message.from_user.id,
+            message_text=message_text,
+            message_id=update.message.message_id,
+            chat_title=chat_title,
+            username=username,
+            first_name=first_name
+        )
+        logger.info(f"✅ Добавлено в непрочитанные: чат '{chat_title}', пользователь {first_name or username or update.message.from_user.id}")
+        
+        # Немедленно обновляем уведомление
+        await send_new_master_notification(context, force=True)
 
 async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает личные сообщения"""
@@ -2081,29 +2096,43 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         
     logger.info(f"📨 Получено личное сообщение от {update.message.from_user.id}: {update.message.text[:50] if update.message.text else '[без текста]'}...")
     
+    # Игнорируем сообщения от самого бота
+    if update.message.from_user.id == context.bot.id:
+        return
+        
+    # Игнорируем менеджеров
     username = update.message.from_user.username
     if is_manager(update.message.from_user.id, username):
         await handle_manager_reply(update, context)
         return
-    
-    # Если это команда - пропускаем, она обработается CommandHandler
+        
+    # Игнорируем служебные сообщения
+    if (update.message.new_chat_members or 
+        update.message.left_chat_member or 
+        update.message.pinned_message or
+        update.edited_message):
+        return
+        
+    # Игнорируем команды (они обрабатываются отдельно CommandHandler)
     if update.message.text and update.message.text.startswith('/'):
         logger.info(f"🔍 Пропускаем команду: {update.message.text}")
         return
-    
-    if not should_respond_to_message(update, context):
-        logger.info("❌ Сообщение не требует обработки")
+        
+    # Игнорируем пустые сообщения
+    if update.message.text and len(update.message.text.strip()) < 1:
         return
-    
+
+    # Обрабатываем обычные сообщения от клиентов
+    user_id = update.message.from_user.id
     if not is_working_hours():
-        user_id = update.message.from_user.id
+        # Нерабочее время - отправляем автоответ
         replied_key = f'user_{user_id}'
         if not flags_manager.has_replied(replied_key):
             await update.message.reply_text(AUTO_REPLY_MESSAGE)
             flags_manager.set_replied(replied_key)
-            logger.info(f"✅ Автоответ отправлен пользователю {user_id}")
+            logger.info(f"✅ Автоответ отправлен пользователю {user_id} (нерабочее время)")
     else:
-        user_id = update.message.from_user.id
+        # Рабочее время - добавляем в непрочитанные
         replied_key = f'user_{user_id}'
         if flags_manager.has_replied(replied_key):
             flags_manager.clear_replied(replied_key)
@@ -2122,8 +2151,8 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         )
         logger.info(f"✅ Добавлено в непрочитанные: пользователь {first_name or username or user_id}")
         
-        # НЕ отправляем уведомление автоматически при новом сообщении - только по расписанию
-        logger.info("📝 Новое сообщение добавлено, уведомление будет отправлено по расписанию")
+        # Немедленно обновляем уведомление
+        await send_new_master_notification(context, force=True)
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ошибок - логирует в консоль, но не отправляет уведомления в Telegram"""
@@ -2239,11 +2268,11 @@ def main():
         
         # Обработчики сообщений (должны быть ПОСЛЕ CommandHandler)
         application.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND | filters.CAPTION | filters.PHOTO | filters.Document.ALL, 
+            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL, 
             handle_group_message
         ))
         application.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND | filters.CAPTION | filters.PHOTO | filters.Document.ALL,
+            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL,
             handle_private_message
         ))
         

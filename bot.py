@@ -1376,7 +1376,7 @@ async def check_files_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 # ========== РЕГИСТРАЦИЯ КАСТОМНЫХ КОМАНД ==========
 
-async def register_custom_commands(app):
+def register_custom_commands(app):
     """Регистрирует все кастомные команды в приложении"""
     if not app:
         return
@@ -2204,9 +2204,9 @@ def main():
         application.add_handler(CommandHandler("managers", managers_command))
         application.add_handler(CommandHandler("stats", stats_command))
         
-        # ВАЖНО: ПОТОМ регистрируем кастомные команды
+        # ВАЖНО: ПОТОМ регистрируем кастомные команды (СИНХРОННО)
         print("📝 Регистрируем кастомные команды...")
-        asyncio.run(register_custom_commands(application))
+        register_custom_commands(application)
         
         # В САМОМ КОНЦЕ обработчики сообщений
         print("📝 Регистрируем обработчики сообщений...")

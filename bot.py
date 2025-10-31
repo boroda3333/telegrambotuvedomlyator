@@ -1420,6 +1420,9 @@ async def check_files_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ========== КОМАНДЫ БОТА ==========
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /start"""
+    logger.info(f"🚀 ВЫЗВАНА КОМАНДА /start от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1444,8 +1447,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/list_exceptions - список исключений\n"
         "/clear_exceptions - очистить все исключения"
     )
+    logger.info("✅ Команда /start выполнена успешно")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /help"""
+    logger.info(f"📖 ВЫЗВАНА КОМАНДА /help от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1503,8 +1510,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Создавайте любые команды с текстом, фото, документами, видео и аудио!
     """
     await update.message.reply_text(help_text, parse_mode='Markdown')
+    logger.info("✅ Команда /help выполнена успешно")
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /status"""
+    logger.info(f"📊 ВЫЗВАНА КОМАНДА /status от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1583,9 +1594,12 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     
     await update.message.reply_text(status_text, parse_mode='Markdown')
+    logger.info("✅ Команда /status выполнена успешно")
 
 async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать текущие настройки воронок"""
+    logger.info(f"⚙️ ВЫЗВАНА КОМАНДА /funnels от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1606,9 +1620,12 @@ async def funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += "/reset_funnels - сбросить настройки по умолчанию"
     
     await update.message.reply_text(text, parse_mode='Markdown')
+    logger.info("✅ Команда /funnels выполнена успешно")
 
 async def set_funnel_1_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Установить интервал для воронки 1"""
+    logger.info(f"⚙️ ВЫЗВАНА КОМАНДА /set_funnel_1 от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1635,6 +1652,8 @@ async def set_funnel_1_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def set_funnel_2_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Установить интервал для воронки 2"""
+    logger.info(f"⚙️ ВЫЗВАНА КОМАНДА /set_funnel_2 от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1661,6 +1680,8 @@ async def set_funnel_2_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def set_funnel_3_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Установить интервал для воронки 3"""
+    logger.info(f"⚙️ ВЫЗВАНА КОМАНДА /set_funnel_3 от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1687,6 +1708,8 @@ async def set_funnel_3_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def reset_funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сбросить настройки воронок к значениям по умолчанию"""
+    logger.info(f"⚙️ ВЫЗВАНА КОМАНДА /reset_funnels от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1696,9 +1719,12 @@ async def reset_funnels_command(update: Update, context: ContextTypes.DEFAULT_TY
     
     funnels_config.reset_to_default()
     await update.message.reply_text("✅ Настройки воронок сброшены к значениям по умолчанию")
+    logger.info("✅ Команда /reset_funnels выполнена успешно")
 
 async def force_update_funnels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Принудительно обновить статусы воронок"""
+    logger.info(f"🔄 ВЫЗВАНА КОМАНДА /force_update_funnels от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1708,9 +1734,12 @@ async def force_update_funnels_command(update: Update, context: ContextTypes.DEF
     
     updated_count = await update_message_funnel_statuses()
     await update.message.reply_text(f"✅ Принудительно обновлены статусы воронок для {updated_count} сообщений")
+    logger.info("✅ Команда /force_update_funnels выполнена успешно")
 
 async def set_work_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Установить текущий чат как рабочий для уведомлений"""
+    logger.info(f"💬 ВЫЗВАНА КОМАНДА /set_work_chat от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1737,6 +1766,8 @@ async def set_work_chat_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать список менеджеров"""
+    logger.info(f"👥 ВЫЗВАНА КОМАНДА /managers от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1765,9 +1796,12 @@ async def managers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += f"\n📊 Всего менеджеров: {len(excluded_users['user_ids']) + len(excluded_users['usernames'])}"
     
     await update.message.reply_text(text, parse_mode='Markdown')
+    logger.info("✅ Команда /managers выполнена успешно")
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать статистику"""
+    logger.info(f"📊 ВЫЗВАНА КОМАНДА /stats от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1812,9 +1846,12 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "  Нет непрочитанных сообщений\n"
     
     await update.message.reply_text(text, parse_mode='Markdown')
+    logger.info("✅ Команда /stats выполнена успешно")
 
 async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать список непрочитанных сообщений"""
+    logger.info(f"📋 ВЫЗВАНА КОМАНДА /pending от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1857,9 +1894,12 @@ async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text += f"📊 Всего: {len(all_messages)} сообщений в {len(chats_data)} чатах"
     
     await update.message.reply_text(text, parse_mode='Markdown')
+    logger.info("✅ Команда /pending выполнена успешно")
 
 async def clear_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Очистить сообщения из текущего чата"""
+    logger.info(f"🧹 ВЫЗВАНА КОМАНДА /clear_chat от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1876,9 +1916,12 @@ async def clear_chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await send_new_master_notification(context, force=True)
     else:
         await update.message.reply_text("✅ В этом чате нет непрочитанных сообщений")
+    logger.info("✅ Команда /clear_chat выполнена успешно")
 
 async def clear_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Очистить все непрочитанные сообщения"""
+    logger.info(f"🧹 ВЫЗВАНА КОМАНДА /clear_all от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1894,9 +1937,12 @@ async def clear_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_new_master_notification(context, force=True)
     else:
         await update.message.reply_text("✅ Нет непрочитанных сообщений для очистки")
+    logger.info("✅ Команда /clear_all выполнена успешно")
 
 async def add_exception_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Добавить менеджера в исключения"""
+    logger.info(f"👥 ВЫЗВАНА КОМАНДА /add_exception от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1932,9 +1978,12 @@ async def add_exception_command(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text(f"❌ Пользователь @{username} уже является менеджером")
     else:
         await update.message.reply_text("❌ Укажите ID пользователя или @username")
+    logger.info("✅ Команда /add_exception выполнена успешно")
 
 async def remove_exception_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Удалить менеджера из исключений"""
+    logger.info(f"👥 ВЫЗВАНА КОМАНДА /remove_exception от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1970,9 +2019,12 @@ async def remove_exception_command(update: Update, context: ContextTypes.DEFAULT
             await update.message.reply_text(f"❌ Пользователь @{username} не найден в менеджерах")
     else:
         await update.message.reply_text("❌ Укажите ID пользователя или @username")
+    logger.info("✅ Команда /remove_exception выполнена успешно")
 
 async def list_exceptions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать список всех менеджеров"""
+    logger.info(f"👥 ВЫЗВАНА КОМАНДА /list_exceptions от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1984,6 +2036,8 @@ async def list_exceptions_command(update: Update, context: ContextTypes.DEFAULT_
 
 async def clear_exceptions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Очистить все исключения"""
+    logger.info(f"👥 ВЫЗВАНА КОМАНДА /clear_exceptions от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -1993,9 +2047,12 @@ async def clear_exceptions_command(update: Update, context: ContextTypes.DEFAULT
     
     excluded_users_manager.clear_all()
     await update.message.reply_text("✅ Все менеджеры удалены из исключений")
+    logger.info("✅ Команда /clear_exceptions выполнена успешно")
 
 async def update_notification_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обновить единое уведомление"""
+    logger.info(f"📢 ВЫЗВАНА КОМАНДА /update_notification от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -2005,9 +2062,12 @@ async def update_notification_command(update: Update, context: ContextTypes.DEFA
     
     await update.message.reply_text("🔄 Обновление уведомления...")
     await send_new_master_notification(context, force=True)
+    logger.info("✅ Команда /update_notification выполнена успешно")
 
 async def test_notification_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Тестовая команда для отправки уведомления"""
+    logger.info(f"🧪 ВЫЗВАНА КОМАНДА /test_notification от пользователя {update.message.from_user.id}")
+    
     if not update or not update.message:
         return
         
@@ -2021,6 +2081,7 @@ async def test_notification_command(update: Update, context: ContextTypes.DEFAUL
         await update.message.reply_text("✅ Тестовое уведомление отправлено!")
     else:
         await update.message.reply_text("❌ Не удалось отправить тестовое уведомление")
+    logger.info("✅ Команда /test_notification выполнена успешно")
 
 # ========== ОБРАБОТЧИКИ СООБЩЕНИЙ ==========
 
@@ -2248,23 +2309,10 @@ def main():
         
         application = Application.builder().token(BOT_TOKEN).build()
         
-        # СНАЧАЛА регистрируем обработчики сообщений (они должны быть ПЕРВЫМИ)
-        print("📝 Регистрируем обработчики сообщений...")
-        application.add_handler(MessageHandler(
-            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL, 
-            handle_group_message
-        ))
-        application.add_handler(MessageHandler(
-            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL,
-            handle_private_message
-        ))
+        # ВАЖНО: СНАЧАЛА регистрируем CommandHandler, ПОТОМ MessageHandler
+        print("📝 Регистрируем обработчики команд...")
         
-        # ПОТОМ регистрируем ВСЕ кастомные команды
-        print("📝 Регистрируем кастомные команды...")
-        custom_commands_manager.register_all_handlers()
-        
-        # ЗАТЕМ основные команды бота
-        print("📝 Регистрируем основные команды бота...")
+        # Основные команды бота
         application.add_handler(CommandHandler("start", start_command))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("status", status_command))
@@ -2275,16 +2323,6 @@ def main():
         application.add_handler(CommandHandler("edit_command", edit_command_command))
         application.add_handler(CommandHandler("delete_command", delete_command_command))
         application.add_handler(CommandHandler("list_commands", list_commands_command))
-        
-        # Обработчики для создания команд
-        application.add_handler(MessageHandler(
-            filters.PHOTO | filters.Document.ALL | filters.VIDEO | filters.AUDIO,
-            handle_file_for_command
-        ))
-        application.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            handle_text_for_command
-        ))
         
         # Команды для управления воронками
         application.add_handler(CommandHandler("funnels", funnels_command))
@@ -2313,6 +2351,31 @@ def main():
         application.add_handler(CommandHandler("set_work_chat", set_work_chat_command))
         application.add_handler(CommandHandler("managers", managers_command))
         application.add_handler(CommandHandler("stats", stats_command))
+        
+        # ПОТОМ регистрируем ВСЕ кастомные команды
+        print("📝 Регистрируем кастомные команды...")
+        custom_commands_manager.register_all_handlers()
+        
+        # ЗАТЕМ обработчики сообщений (они должны быть ПОСЛЕДНИМИ)
+        print("📝 Регистрируем обработчики сообщений...")
+        application.add_handler(MessageHandler(
+            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL, 
+            handle_group_message
+        ))
+        application.add_handler(MessageHandler(
+            filters.TEXT | filters.CAPTION | filters.PHOTO | filters.Document.ALL,
+            handle_private_message
+        ))
+        
+        # Обработчики для создания команд
+        application.add_handler(MessageHandler(
+            filters.PHOTO | filters.Document.ALL | filters.VIDEO | filters.AUDIO,
+            handle_file_for_command
+        ))
+        application.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            handle_text_for_command
+        ))
         
         # Обработчик ошибок
         application.add_error_handler(error_handler)

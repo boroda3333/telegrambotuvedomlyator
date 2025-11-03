@@ -16,7 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Токен бота из переменных окружения Railway
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '7952222222:AAHNNBA5OnoQrblwY4BO0BoETb-9_z_g')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '8409056345:AAEgAOIvZsKO5aezqNoLT8AZbybidygFmhM')
 
 # Таймзона Москвы
 MOSCOW_TZ = pytz.timezone('Europe/Moscow')
@@ -29,7 +29,7 @@ AUTO_REPLY_MESSAGE = """Здравствуйте, вы написали в не�
 **сообщение автоматическое, отвечать на него не нужно**"""
 
 # ID администраторов
-ADMIN_IDS = {7842709072, 1772492746, 1661202178, 478084322}
+ADMIN_IDS = {7842709072, 1772492746}
 
 # Файлы для сохранения данных
 FLAGS_FILE = "auto_reply_flags.json"
@@ -1549,7 +1549,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if not update or not update.message:
         return
         
-    logger.info(f"📨 Получено групповое сообщение: {update.message.chat.title} - {update.message.text[:50] if update.message.text else '[без текста]'}...")
+    logger.info(f"📨 Получено групповое сообщение: {update.message.chat.title} - {update.message.text[:50] if update.message.text else '[медиа]'}...")
     
     username = update.message.from_user.username
     if is_manager(update.message.from_user.id, username):
@@ -1561,43 +1561,49 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     
     if update.message.chat.type in ['group', 'supergroup']:
+        chat_id = update.message.chat.id
+        replied_key = f'chat_{chat_id}'
+        
         if not is_working_hours():
-            chat_id = update.message.chat.id
-            replied_key = f'chat_{chat_id}'
+            # Проверяем, не отправляли ли уже автоответ в этот чат
             if not flags_manager.has_replied(replied_key):
                 await update.message.reply_text(AUTO_REPLY_MESSAGE)
                 flags_manager.set_replied(replied_key)
                 logger.info(f"✅ Автоответ отправлен в чат {chat_id}")
+            else:
+                logger.info(f"ℹ️ Автоответ уже был отправлен в чат {chat_id}, пропускаем")
         else:
-            chat_id = update.message.chat.id
-            replied_key = f'chat_{chat_id}'
+            # В рабочее время сбрасываем флаг автоответа для этого чата
             if flags_manager.has_replied(replied_key):
                 flags_manager.clear_replied(replied_key)
+                logger.info(f"🔄 Флаг автоответа сброшен для чата {chat_id} (рабочее время)")
             
-            chat_title = update.message.chat.title
-            username = update.message.from_user.username
-            first_name = update.message.from_user.first_name
-            message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
-            
-            pending_messages_manager.add_message(
-                chat_id=update.message.chat.id,
-                user_id=update.message.from_user.id,
-                message_text=message_text,
-                message_id=update.message.message_id,
-                chat_title=chat_title,
-                username=username,
-                first_name=first_name
-            )
-            logger.info(f"✅ Добавлено в непрочитанные: чат '{chat_title}', пользователь {update.message.from_user.id}")
-            
-            # НЕ отправляем уведомление автоматически при новом сообщении - только по расписанию
-            logger.info("📝 Новое сообщение добавлено, уведомление будет отправлено по расписанию")
+            # Добавляем сообщение в непрочитанные только если оно от клиента (не менеджера)
+            if not is_manager(update.message.from_user.id, username):
+                chat_title = update.message.chat.title
+                username = update.message.from_user.username
+                first_name = update.message.from_user.first_name
+                message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
+                
+                pending_messages_manager.add_message(
+                    chat_id=update.message.chat.id,
+                    user_id=update.message.from_user.id,
+                    message_text=message_text,
+                    message_id=update.message.message_id,
+                    chat_title=chat_title,
+                    username=username,
+                    first_name=first_name
+                )
+                logger.info(f"✅ Добавлено в непрочитанные: чат '{chat_title}', пользователь {update.message.from_user.id}")
+                
+                # НЕ отправляем уведомление автоматически при новом сообщении - только по расписанию
+                logger.info("📝 Новое сообщение добавлено, уведомление будет отправлено по расписанию")
 
 async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update or not update.message:
         return
         
-    logger.info(f"📨 Получено личное сообщение от {update.message.from_user.id}: {update.message.text[:50] if update.message.text else '[без текста]'}...")
+    logger.info(f"📨 Получено личное сообщение от {update.message.from_user.id}: {update.message.text[:50] if update.message.text else '[медиа]'}...")
     
     username = update.message.from_user.username
     if is_manager(update.message.from_user.id, username):
@@ -1608,36 +1614,41 @@ async def handle_private_message(update: Update, context: ContextTypes.DEFAULT_T
         logger.info("❌ Сообщение не требует обработки")
         return
     
+    user_id = update.message.from_user.id
+    replied_key = f'user_{user_id}'
+    
     if not is_working_hours():
-        user_id = update.message.from_user.id
-        replied_key = f'user_{user_id}'
+        # Проверяем, не отправляли ли уже автоответ этому пользователю
         if not flags_manager.has_replied(replied_key):
             await update.message.reply_text(AUTO_REPLY_MESSAGE)
             flags_manager.set_replied(replied_key)
             logger.info(f"✅ Автоответ отправлен пользователю {user_id}")
+        else:
+            logger.info(f"ℹ️ Автоответ уже был отправлен пользователю {user_id}, пропускаем")
     else:
-        user_id = update.message.from_user.id
-        replied_key = f'user_{user_id}'
+        # В рабочее время сбрасываем флаг автоответа для этого пользователя
         if flags_manager.has_replied(replied_key):
             flags_manager.clear_replied(replied_key)
+            logger.info(f"🔄 Флаг автоответа сброшен для пользователя {user_id} (рабочее время)")
         
-        username = update.message.from_user.username
-        first_name = update.message.from_user.first_name
-        message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
-        
-        pending_messages_manager.add_message(
-            chat_id=update.message.chat.id,
-            user_id=update.message.from_user.id,
-            message_text=message_text,
-            message_id=update.message.message_id,
-            username=username,
-            first_name=first_name
-        )
-        logger.info(f"✅ Добавлено в непрочитанные: пользователь {first_name or username or user_id}")
-        
-        # НЕ отправляем уведомление автоматически при новом сообщении - только по расписанию
-        logger.info("📝 Новое сообщение добавлено, уведомление будет отправлено по расписанию")
-
+        # Добавляем сообщение в непрочитанные только если оно от клиента (не менеджера)
+        if not is_manager(update.message.from_user.id, username):
+            username = update.message.from_user.username
+            first_name = update.message.from_user.first_name
+            message_text = update.message.text or update.message.caption or "[Сообщение без текста]"
+            
+            pending_messages_manager.add_message(
+                chat_id=update.message.chat.id,
+                user_id=update.message.from_user.id,
+                message_text=message_text,
+                message_id=update.message.message_id,
+                username=username,
+                first_name=first_name
+            )
+            logger.info(f"✅ Добавлено в непрочитанные: пользователь {first_name or username or user_id}")
+            
+            # НЕ отправляем уведомление автоматически при новом сообщении - только по расписанию
+            logger.info("📝 Новое сообщение добавлено, уведомление будет отправлено по расписанию")
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ошибок - логирует в консоль, но не отправляет уведомления в Telegram"""
     logger.error(f"💥 Ошибка при обработке сообщения: {context.error}")
@@ -1756,4 +1767,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
